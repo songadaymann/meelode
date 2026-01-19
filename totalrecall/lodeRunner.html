@@ -538,6 +538,8 @@
 	// Request keyboard from mann.cool parent
 	window.requestMannCoolKeyboard = function(show) {
 		console.log('[Meelode] requestMannCoolKeyboard called, show:', show, 'isInIframe:', isInIframe);
+		console.log('[Meelode] window.parent:', window.parent);
+		console.log('[Meelode] window.parent === window:', window.parent === window);
 		if (isInIframe) {
 			var msg = {
 				type: 'requestKeyboard',
@@ -545,7 +547,12 @@
 				context: 'nameInput'
 			};
 			console.log('[Meelode] Sending to parent:', JSON.stringify(msg));
-			window.parent.postMessage(msg, '*');
+			try {
+				window.parent.postMessage(msg, '*');
+				console.log('[Meelode] postMessage sent successfully');
+			} catch (e) {
+				console.error('[Meelode] postMessage failed:', e);
+			}
 		} else {
 			console.log('[Meelode] Not in iframe, skipping postMessage');
 		}
