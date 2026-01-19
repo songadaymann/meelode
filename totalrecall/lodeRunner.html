@@ -690,6 +690,11 @@ window.syncVirtualInput = function() {
 	window.addEventListener('message', function(event) {
 		console.log('[Meelode] RAW message received:', event.data, 'from origin:', event.origin);
 
+		// Send acknowledgment back to parent (for debugging)
+		if (window.parent !== window && event.data && event.data.type === 'keyEvent') {
+			window.parent.postMessage({ type: 'meelode-ack', key: event.data.key }, '*');
+		}
+
 		var data = event.data || {};
 		var type = data.type;
 		var key = data.key;
