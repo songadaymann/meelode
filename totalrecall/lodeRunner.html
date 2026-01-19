@@ -653,24 +653,30 @@
 			var keyCode = keyCodeMap[key];
 
 			if (keyCode) {
-				// Create keyboard event
-				var kbEvent = new KeyboardEvent(eventType, {
+				// Create a fake event object with keyCode set
+				// (matching how lodeRunner.gamepad.js does it)
+				var fakeEvent = {
+					keyCode: keyCode,
+					which: keyCode,
 					key: key,
 					code: key,
-					bubbles: true,
-					cancelable: true
-				});
+					shiftKey: false,
+					ctrlKey: false,
+					altKey: false,
+					preventDefault: function() {},
+					stopPropagation: function() {}
+				};
 
-				// IMPORTANT: keyCode is deprecated and doesn't get set by the constructor
-				// in modern browsers. We must use Object.defineProperty to make it readable.
-				// The name input handler in lodeRunner.hiscore.js relies on event.keyCode.
-				Object.defineProperty(kbEvent, 'keyCode', { get: function() { return keyCode; } });
-				Object.defineProperty(kbEvent, 'which', { get: function() { return keyCode; } });
+				// Directly call the document's keydown/keyup handler
+				// This is more reliable than dispatchEvent for property-based handlers
+				if (eventType === 'keydown' && typeof document.onkeydown === 'function') {
+					document.onkeydown(fakeEvent);
+				}
+				if (eventType === 'keyup' && typeof document.onkeyup === 'function') {
+					document.onkeyup(fakeEvent);
+				}
 
-				// Dispatch to document (where handleKeyDown and name input handlers listen)
-				document.dispatchEvent(kbEvent);
-
-				// Also directly call pressKey for keydown to ensure it works during gameplay
+				// Also directly call pressKey for keydown to ensure movement works
 				if (eventType === 'keydown' && typeof pressKey === 'function') {
 					// Only process if game is in a playable state (and NOT in name input mode)
 					if (typeof gameState !== 'undefined' &&
