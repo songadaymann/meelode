@@ -688,6 +688,8 @@ window.syncVirtualInput = function() {
 	var isInIframe = window.parent !== window;
 
 	window.addEventListener('message', function(event) {
+		console.log('[Meelode] RAW message received:', event.data, 'from origin:', event.origin);
+
 		var data = event.data || {};
 		var type = data.type;
 		var key = data.key;
