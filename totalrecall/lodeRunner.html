@@ -616,6 +616,59 @@
 // Use D-pad to enter name: UP/DOWN cycles A-Z, LEFT/RIGHT moves cursor
 // =====================================================
 
+// =====================================================
+// Virtual Input State (CTN-style approach)
+// =====================================================
+// This object maintains the current state of virtual controller inputs.
+// It's updated by postMessage events and read by the game tick loop.
+// This approach is more reliable than event-based input because it
+// doesn't depend on which keyboard handler is currently active.
+
+window._virtualInput = {
+	left: false,
+	right: false,
+	up: false,
+	down: false,
+	digLeft: false,
+	digRight: false,
+	pause: false,
+	enter: false
+};
+
+// Function to sync virtual input state to keyAction (called from game tick)
+window.syncVirtualInput = function() {
+	// Only sync if we have virtual input and game globals are available
+	if (!window._virtualInput) return;
+	if (typeof keyAction === 'undefined') return;
+	if (typeof ACT_LEFT === 'undefined') return;
+
+	// Check game state - only update keyAction during gameplay
+	var inPlayableState = typeof gameState !== 'undefined' &&
+		(gameState === GAME_START || gameState === GAME_RUNNING);
+
+	if (!inPlayableState) return;
+
+	// Don't override if player is using keyboard (keyAction already set)
+	// Virtual input only takes effect if no keyboard input
+	var vi = window._virtualInput;
+
+	// Priority: dig actions > movement (matching keyboard behavior)
+	if (vi.digLeft) {
+		keyAction = ACT_DIG_LEFT;
+	} else if (vi.digRight) {
+		keyAction = ACT_DIG_RIGHT;
+	} else if (vi.left) {
+		keyAction = ACT_LEFT;
+	} else if (vi.right) {
+		keyAction = ACT_RIGHT;
+	} else if (vi.up) {
+		keyAction = ACT_UP;
+	} else if (vi.down) {
+		keyAction = ACT_DOWN;
+	}
+	// Note: We don't set ACT_STOP here - let the game handle that naturally
+};
+
 (function() {
 	// Map arrow key names to keyCodes
 	var keyCodeMap = {
@@ -650,14 +703,31 @@
 
 		// Handle keyboard events from virtual controller
 		if (type === 'keyEvent' && key && eventType) {
+			var isDown = (eventType === 'keydown');
 			var keyCode = keyCodeMap[key];
-			console.log('[Meelode] keyEvent received:', key, eventType, 'keyCode:', keyCode);
-			console.log('[Meelode] document.onkeydown:', typeof document.onkeydown);
-			console.log('[Meelode] gameState:', typeof gameState !== 'undefined' ? gameState : 'undefined');
+
+			// Update virtual input state (CTN-style approach)
+			// This state persists and is read by the game tick loop
+			if (key === 'ArrowLeft') {
+				window._virtualInput.left = isDown;
+			} else if (key === 'ArrowRight') {
+				window._virtualInput.right = isDown;
+			} else if (key === 'ArrowUp') {
+				window._virtualInput.up = isDown;
+			} else if (key === 'ArrowDown') {
+				window._virtualInput.down = isDown;
+			} else if (key === 'z' || key === 'Z') {
+				window._virtualInput.digLeft = isDown;
+			} else if (key === 'x' || key === 'X') {
+				window._virtualInput.digRight = isDown;
+			} else if (key === 'Escape') {
+				window._virtualInput.pause = isDown;
+			} else if (key === 'Enter') {
+				window._virtualInput.enter = isDown;
+			}
 
 			if (keyCode) {
 				// Create a fake event object with keyCode set
-				// (matching how lodeRunner.gamepad.js does it)
 				var fakeEvent = {
 					keyCode: keyCode,
 					which: keyCode,
@@ -670,31 +740,13 @@
 					stopPropagation: function() {}
 				};
 
-				// Directly call the document's keydown/keyup handler
-				// This is more reliable than dispatchEvent for property-based handlers
+				// Still call document handlers for menus, name input, etc.
 				if (eventType === 'keydown' && typeof document.onkeydown === 'function') {
-					console.log('[Meelode] Calling document.onkeydown with keyCode:', keyCode);
 					document.onkeydown(fakeEvent);
 				}
 				if (eventType === 'keyup' && typeof document.onkeyup === 'function') {
 					document.onkeyup(fakeEvent);
 				}
-
-				// Also directly call pressKey for keydown to ensure movement works
-				if (eventType === 'keydown' && typeof pressKey === 'function') {
-					// Only process if game is in a playable state (and NOT in name input mode)
-					var inPlayableState = typeof gameState !== 'undefined' &&
-						typeof inputNameState !== 'undefined' && inputNameState !== 1 &&
-						(gameState === GAME_START || gameState === GAME_RUNNING ||
-						 (gameState === GAME_PAUSE && keyCode === 27));
-					console.log('[Meelode] inPlayableState:', inPlayableState, 'inputNameState:', typeof inputNameState !== 'undefined' ? inputNameState : 'undefined');
-					if (inPlayableState) {
-						console.log('[Meelode] Calling pressKey with keyCode:', keyCode);
-						pressKey(keyCode);
-					}
-				}
-			} else {
-				console.log('[Meelode] No keyCode mapping for key:', key);
 			}
 		}
 
@@ -720,7 +772,7 @@
 
 	// Detect if running in iframe and log it
 	if (isInIframe) {
-		console.log('Meelode: Running inside iframe (mann.cool mode)');
+		console.log('Meelode: Running inside iframe (mann.cool mode) - virtual input enabled');
 	}
 })();
 

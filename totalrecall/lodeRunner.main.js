@@ -1488,10 +1488,15 @@ var lastScoreTime, scoreDuration;
 var scoreIncValue, finalScore;
 
 function mainTick(event)
-{ 
-	var deltaS = event.delta/1000; 
+{
+	var deltaS = event.delta/1000;
 	var scoreInfo;
-	
+
+	// Sync virtual input from mann.cool mobile controller (if available)
+	if (typeof syncVirtualInput === 'function') {
+		syncVirtualInput();
+	}
+
 	switch(gameState) {
 	case GAME_START:
 		countAutoDemoTimer();	
