@@ -2,6 +2,16 @@
 <html>
 <head>
 	<title>Lode Runner Web Game</title>
+	<script>
+	// EARLY MESSAGE LISTENER - must be registered before anything else
+	// This catches postMessage events from parent window (mann.cool)
+	window._earlyMessages = [];
+	window.addEventListener('message', function(event) {
+		console.log('[Meelode EARLY] message received:', event.data);
+		window._earlyMessages.push(event.data);
+	});
+	console.log('[Meelode] Early message listener registered');
+	</script>
 	<!--
 	* =================================================================================== 
 	* Lode Runner (超級運動員) - APPLE II & C64 version
