@@ -79,11 +79,10 @@ Features:
 - Works in iframe via postMessage API
 
 **Name Input (High Score Entry):**
-When entering a high score name on mobile:
-- **D-pad method:** UP/DOWN cycles through A-Z, LEFT/RIGHT moves cursor, DIG R (X) or virtual Enter submits
-- **Keyboard request:** Game sends `{ type: 'requestKeyboard', show: true, context: 'nameInput' }` to parent
-- **Text input:** mann.cool can send typed characters via `{ type: 'textInputEvent', text: 'ABC' }`
-- **Direct key events:** mann.cool can send individual letters via `{ type: 'keyEvent', key: 'A', eventType: 'keydown' }`
+When entering a high score name on mobile, use the D-pad:
+- **UP/DOWN:** Cycle through A-Z characters
+- **LEFT/RIGHT:** Move cursor position
+- **OK button (Enter):** Submit name
 
 **Global Leaderboard:**
 - Scores submitted automatically after entering name
@@ -155,8 +154,6 @@ Add to mann.cool's games array:
       { key: "x", label: "DIG R" },
       { key: "Enter", label: "OK" },  // For name input confirmation
     ],
-    // Optional: Enable keyboard input for high score name entry
-    // hasTextInput: true,  // mann.cool should listen for requestKeyboard messages
   },
 }
 ```
