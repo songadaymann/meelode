@@ -215,6 +215,7 @@ Add to mann.cool's games array:
 
 - "See All Levels" requires game assets to be loaded first (shows alert if clicked too early)
 - "Create Level" requires game assets to be loaded first
+- Mobile virtual controller (PICO) - controls not yet working, debugging in progress
 
 ---
 
