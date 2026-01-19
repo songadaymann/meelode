@@ -286,6 +286,91 @@
 		#leaderboard-close:hover {
 			background: #ff6b6b;
 		}
+
+		/* Welcome/Help Modal */
+		#welcome-modal {
+			display: none;
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			background: rgba(0, 0, 0, 0.7);
+			z-index: 3000;
+			justify-content: center;
+			align-items: center;
+		}
+
+		#welcome-modal.active {
+			display: flex;
+		}
+
+		#welcome-content {
+			background: #fff;
+			border: 3px solid #000;
+			border-radius: 4px;
+			padding: 25px 35px;
+			max-width: 400px;
+			width: 90%;
+			text-align: center;
+		}
+
+		#welcome-content h2 {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 16px;
+			color: #000;
+			margin-bottom: 20px;
+		}
+
+		.welcome-section {
+			margin: 15px 0;
+			text-align: left;
+		}
+
+		.welcome-section h3 {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+			color: #000;
+			margin-bottom: 8px;
+		}
+
+		.welcome-row {
+			display: flex;
+			justify-content: space-between;
+			font-family: 'Courier New', monospace;
+			font-size: 14px;
+			color: #333;
+			margin: 4px 0;
+		}
+
+		.welcome-key {
+			font-weight: bold;
+			color: #000;
+		}
+
+		.welcome-note {
+			font-family: 'Courier New', monospace;
+			font-size: 12px;
+			color: #666;
+			margin-top: 15px;
+			padding-top: 10px;
+			border-top: 1px solid #ccc;
+		}
+
+		#welcome-close {
+			margin-top: 20px;
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+			padding: 12px 30px;
+			background: #000;
+			border: none;
+			color: #fff;
+			cursor: pointer;
+		}
+
+		#welcome-close:hover {
+			background: #333;
+		}
 	</style>
 
 	<script type="text/javascript" src="lodeRunner.wData.js"></script>
@@ -360,6 +445,47 @@
 			<div class="leaderboard-loading">Loading...</div>
 		</div>
 		<button id="leaderboard-close" onclick="closeLeaderboardModal()">Close</button>
+	</div>
+</div>
+
+<!-- Welcome Modal (shown on first play) -->
+<div id="welcome-modal" onclick="closeWelcomeModal(event)">
+	<div id="welcome-content" onclick="event.stopPropagation()">
+		<h2>HOW TO PLAY</h2>
+
+		<div class="welcome-section">
+			<h3>MOVE</h3>
+			<div class="welcome-row">
+				<span class="welcome-key">Arrow Keys</span>
+				<span>or WASD</span>
+			</div>
+		</div>
+
+		<div class="welcome-section">
+			<h3>DIG</h3>
+			<div class="welcome-row">
+				<span class="welcome-key">Z</span>
+				<span>Dig Left</span>
+			</div>
+			<div class="welcome-row">
+				<span class="welcome-key">X</span>
+				<span>Dig Right</span>
+			</div>
+		</div>
+
+		<div class="welcome-section">
+			<h3>PAUSE</h3>
+			<div class="welcome-row">
+				<span class="welcome-key">ESC</span>
+				<span>Pause Game</span>
+			</div>
+		</div>
+
+		<div class="welcome-note">
+			Click <strong>MENU</strong> (bottom right) for more options
+		</div>
+
+		<button id="welcome-close" onclick="closeWelcomeModal()">START</button>
 	</div>
 </div>
 
@@ -566,6 +692,55 @@ function escapeHtml(text) {
 function formatScore(score) {
 	return String(score).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
+
+// =====================================================
+// Welcome Modal (First Play Help)
+// =====================================================
+var welcomeCallback = null;
+
+function showWelcomeModal(callback) {
+	welcomeCallback = callback;
+	document.getElementById('welcome-modal').classList.add('active');
+}
+
+function closeWelcomeModal(event) {
+	if (event && event.target !== document.getElementById('welcome-modal')) {
+		return;
+	}
+	document.getElementById('welcome-modal').classList.remove('active');
+	if (welcomeCallback) {
+		var cb = welcomeCallback;
+		welcomeCallback = null;
+		cb();
+	}
+}
+
+// Override the showHelpMenu function to use our simple modal
+(function() {
+	var originalShowHelpMenu = null;
+
+	// Wait for the game to load, then override
+	var checkInterval = setInterval(function() {
+		if (typeof showHelpMenu === 'function' && !originalShowHelpMenu) {
+			originalShowHelpMenu = showHelpMenu;
+
+			// Replace with our version
+			window.showHelpMenu = function() {
+				if (typeof firstPlay !== 'undefined' && firstPlay) {
+					showWelcomeModal(function() {
+						if (typeof setFirstPlayInfo === 'function') setFirstPlayInfo();
+						if (typeof initForPlay === 'function') initForPlay();
+					});
+				} else {
+					if (typeof initForPlay === 'function') initForPlay();
+				}
+			};
+
+			clearInterval(checkInterval);
+			console.log('Welcome modal override installed');
+		}
+	}, 100);
+})();
 
 function selectOriginalMode() {
 	console.log('>>> selectOriginalMode() called');
