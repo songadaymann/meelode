@@ -371,6 +371,116 @@
 		#welcome-close:hover {
 			background: #333;
 		}
+
+		/* Responsive styles for small screens (PICO mobile view) */
+		@media (max-width: 480px), (max-height: 480px) {
+			/* Menu Modal */
+			#menu-content {
+				padding: 15px 20px;
+				max-width: 95%;
+				max-height: 90vh;
+				overflow-y: auto;
+			}
+			#menu-content h2 {
+				font-size: 14px;
+				margin-bottom: 15px;
+			}
+			.menu-option {
+				font-size: 10px;
+				padding: 10px 15px;
+				margin: 6px 0;
+			}
+			#menu-close {
+				font-size: 10px;
+				margin-top: 10px;
+			}
+
+			/* Leaderboard Modal */
+			#leaderboard-content {
+				padding: 12px 15px;
+				max-width: 95%;
+				max-height: 85vh;
+			}
+			#leaderboard-content h2 {
+				font-size: 12px;
+				margin-bottom: 12px;
+			}
+			.leaderboard-tab {
+				font-size: 8px;
+				padding: 6px 8px;
+			}
+			.leaderboard-entry {
+				padding: 6px;
+				font-size: 8px;
+			}
+			.leaderboard-entry .level {
+				font-size: 6px;
+			}
+			#leaderboard-close {
+				font-size: 8px;
+				padding: 8px 15px;
+				margin-top: 12px;
+			}
+
+			/* Welcome Modal */
+			#welcome-content {
+				padding: 15px 20px;
+				max-width: 95%;
+				max-height: 90vh;
+				overflow-y: auto;
+			}
+			#welcome-content h2 {
+				font-size: 12px;
+				margin-bottom: 12px;
+			}
+			.welcome-section {
+				margin: 10px 0;
+			}
+			.welcome-section h3 {
+				font-size: 8px;
+				margin-bottom: 5px;
+			}
+			.welcome-row {
+				font-size: 11px;
+				margin: 3px 0;
+			}
+			.welcome-note {
+				font-size: 9px;
+				margin-top: 10px;
+				padding-top: 8px;
+			}
+			#welcome-close {
+				font-size: 8px;
+				padding: 10px 20px;
+				margin-top: 12px;
+			}
+		}
+
+		/* Extra small screens */
+		@media (max-width: 320px), (max-height: 320px) {
+			#menu-content h2 {
+				font-size: 11px;
+				margin-bottom: 10px;
+			}
+			.menu-option {
+				font-size: 8px;
+				padding: 8px 10px;
+				margin: 4px 0;
+			}
+			#welcome-content h2 {
+				font-size: 10px;
+			}
+			.welcome-section h3 {
+				font-size: 7px;
+			}
+			.welcome-row {
+				font-size: 9px;
+			}
+			#welcome-close {
+				font-size: 7px;
+				padding: 8px 15px;
+			}
+		}
 	</style>
 
 	<script type="text/javascript" src="lodeRunner.wData.js"></script>
