@@ -206,7 +206,7 @@ function showScoreTable(_playData, _curScoreInfo, _callbackFun, _waitTime)
 		document.onkeydown = savedKeyDownHander;
 	}			
 	
-	function inputHiScoreName(winner) 
+	function inputHiScoreName(winner)
 	{
 		var name, nameText;
 		var curPos = 0;
@@ -214,6 +214,14 @@ function showScoreTable(_playData, _curScoreInfo, _callbackFun, _waitTime)
 		var cursor;
 
 		if(winner) endingMusicPlay(); //6/15/2015, play ending music for winner
+
+		// Request keyboard from mann.cool if in iframe
+		console.log('[Meelode] inputHiScoreName called, winner:', winner);
+		console.log('[Meelode] requestMannCoolKeyboard exists:', typeof window.requestMannCoolKeyboard === 'function');
+		if (typeof window.requestMannCoolKeyboard === 'function') {
+			window.requestMannCoolKeyboard(true);
+		}
+
 		initInput();
 		
 		function initInput()
@@ -243,6 +251,11 @@ function showScoreTable(_playData, _curScoreInfo, _callbackFun, _waitTime)
 		function inputFinish(async)
 		{
 			if(winner) endingMusicStop(); //6/15/2015, stop ending music
+
+			// Hide keyboard from mann.cool if in iframe
+			if (typeof window.requestMannCoolKeyboard === 'function') {
+				window.requestMannCoolKeyboard(false);
+			}
 
 			//cut tail space
 			for(var i = name.length-1; i >= 0; i--) {
@@ -396,24 +409,29 @@ function showScoreTable(_playData, _curScoreInfo, _callbackFun, _waitTime)
 	}
 }
  
-function inputPlayerName(_stage, _callbackFun) 
+function inputPlayerName(_stage, _callbackFun)
 {
 	var constString = "PLAYER NAME:"
 	var constSize = constString.length;
 	var maxInputSize = MAX_HISCORE_NAME_LENGTH;
 	var borderSize = 2;
-	var totalSizeX = constSize + maxInputSize + borderSize + 1; //+1 flash 
+	var totalSizeX = constSize + maxInputSize + borderSize + 1; //+1 flash
 	var totalSizeY = 3;
-	
+
 	var inputBoardX = (NO_OF_TILES_X - totalSizeX) / 2;
 	var inputBoardY = (NO_OF_TILES_Y - totalSizeY) / 2;
-	
+
 	var inputStartX = inputBoardX + constSize + 1;
 	var inputStartY = inputBoardY + 1;
-	
+
 	var background = new createjs.Shape();
 	var textBorder = new createjs.Shape();
 	var textBackground = new createjs.Shape();
+
+	// Request keyboard from mann.cool if in iframe
+	if (typeof window.requestMannCoolKeyboard === 'function') {
+		window.requestMannCoolKeyboard(true);
+	}
 	
 	background.graphics.beginFill("black").drawRect(0, 0, _stage.canvas.width, _stage.canvas.height).endFill();
 	background.alpha = 0.2;
@@ -438,15 +456,20 @@ function inputPlayerName(_stage, _callbackFun)
 	x = inputStartX*tileWScale; y = inputStartY*tileHScale;
 	inputString(_stage, maxInputSize, x, y, playerName, inputComplete);
 	
-	function inputComplete(string) 
+	function inputComplete(string)
 	{
+		// Hide keyboard from mann.cool if in iframe
+		if (typeof window.requestMannCoolKeyboard === 'function') {
+			window.requestMannCoolKeyboard(false);
+		}
+
 		setPlayerName(string);
 		playerName = string;
-		
+
 		//remove const object
-		for(var i = 0; i < constObj.length; i++) 
+		for(var i = 0; i < constObj.length; i++)
 			_stage.removeChild(constObj[i]);
-		
+
 		//remove textBackground, textBorder & background
 		_stage.removeChild(textBackground, textBorder, background);
 		_stage.update();

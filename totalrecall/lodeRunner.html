@@ -500,6 +500,19 @@
 // - D-pad: Movement (ArrowUp/Down/Left/Right)
 // - A button (Z key): Dig left
 // - B button (X key): Dig right
+//
+// Name Input Mode:
+// When entering a high score name, the game supports:
+// 1. D-pad controls: UP/DOWN cycles A-Z, LEFT/RIGHT moves cursor
+// 2. Mobile keyboard: Game sends 'requestKeyboard' message to parent
+// 3. textInputEvent: Parent can send typed text via postMessage
+//
+// Messages sent TO mann.cool:
+//   { type: 'requestKeyboard', show: true/false, context: 'nameInput' }
+//
+// Messages received FROM mann.cool:
+//   { type: 'textInputEvent', text: 'ABC' }  // For typed characters
+//   { type: 'keyEvent', key: 'A', eventType: 'keydown' }  // For single keys
 // =====================================================
 
 (function() {
@@ -514,7 +527,28 @@
 		'x': 88,
 		'X': 88,
 		'Escape': 27,
-		'Enter': 13
+		'Enter': 13,
+		'Backspace': 8,
+		' ': 32
+	};
+
+	// Track if we're in an iframe (mann.cool mode)
+	var isInIframe = window.parent !== window;
+
+	// Request keyboard from mann.cool parent
+	window.requestMannCoolKeyboard = function(show) {
+		console.log('[Meelode] requestMannCoolKeyboard called, show:', show, 'isInIframe:', isInIframe);
+		if (isInIframe) {
+			var msg = {
+				type: 'requestKeyboard',
+				show: show,
+				context: 'nameInput'
+			};
+			console.log('[Meelode] Sending to parent:', JSON.stringify(msg));
+			window.parent.postMessage(msg, '*');
+		} else {
+			console.log('[Meelode] Not in iframe, skipping postMessage');
+		}
 	};
 
 	window.addEventListener('message', function(event) {
@@ -522,6 +556,11 @@
 		var type = data.type;
 		var key = data.key;
 		var eventType = data.eventType;
+
+		// Log all incoming messages for debugging
+		if (type) {
+			console.log('[Meelode] Received message:', JSON.stringify(data));
+		}
 
 		// Resume audio context if suspended (browser suspends when clicking outside iframe)
 		if (typeof createjs !== 'undefined' && createjs.Sound && createjs.Sound.activePlugin) {
@@ -531,9 +570,51 @@
 			}
 		}
 
+		// Handle text input events (for mobile keyboard integration)
+		// mann.cool can send typed characters via this message type
+		if (type === 'textInputEvent' && data.text !== undefined) {
+			console.log('[Meelode] Processing textInputEvent, text:', data.text, 'inputNameState:', typeof inputNameState !== 'undefined' ? inputNameState : 'undefined');
+			var text = data.text;
+			// Only process if we're in name input mode
+			if (typeof inputNameState !== 'undefined' && inputNameState === 1) {
+				// Dispatch each character as a keydown event
+				for (var i = 0; i < text.length; i++) {
+					var char = text[i].toUpperCase();
+					var charCode = char.charCodeAt(0);
+
+					// Only allow valid characters (A-Z, 0-9, ., -, space)
+					if ((charCode >= 65 && charCode <= 90) ||   // A-Z
+						(charCode >= 48 && charCode <= 57) ||   // 0-9
+						char === '.' || char === '-' || char === ' ') {
+
+						var kbEvent = new KeyboardEvent('keydown', {
+							key: char,
+							code: 'Key' + char,
+							keyCode: charCode,
+							which: charCode,
+							bubbles: true,
+							cancelable: true
+						});
+						document.dispatchEvent(kbEvent);
+					}
+				}
+			}
+			return;
+		}
+
 		// Handle keyboard events from virtual controller
 		if (type === 'keyEvent' && key && eventType) {
 			var keyCode = keyCodeMap[key];
+
+			// If we're in name input mode and this is a letter key, allow it through
+			if (!keyCode && typeof inputNameState !== 'undefined' && inputNameState === 1) {
+				// Handle single character keys (A-Z, 0-9)
+				if (key.length === 1) {
+					var upperKey = key.toUpperCase();
+					keyCode = upperKey.charCodeAt(0);
+				}
+			}
+
 			if (keyCode) {
 				// Create and dispatch keyboard event
 				var kbEvent = new KeyboardEvent(eventType, {
@@ -550,8 +631,9 @@
 
 				// Also directly call pressKey for keydown to ensure it works
 				if (eventType === 'keydown' && typeof pressKey === 'function') {
-					// Only process if game is in a playable state
+					// Only process if game is in a playable state (and NOT in name input mode)
 					if (typeof gameState !== 'undefined' &&
+						typeof inputNameState !== 'undefined' && inputNameState !== 1 &&
 						(gameState === GAME_START || gameState === GAME_RUNNING ||
 						 (gameState === GAME_PAUSE && keyCode === 27))) {
 						pressKey(keyCode);
@@ -581,7 +663,7 @@
 	});
 
 	// Detect if running in iframe and log it
-	if (window.parent !== window) {
+	if (isInIframe) {
 		console.log('Meelode: Running inside iframe (mann.cool mode)');
 	}
 })();
