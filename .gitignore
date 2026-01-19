@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+*.js.map
+*.d.ts
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# IDE / Editor
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime / Logs
+*.log
+.cache/
+
+# Source materials (temporary assets, not needed for deployment)
+human-materials-ignore/
+
+# Training data (can be regenerated from scripts)
+original-level-txt-download-images/
+
+# TotalRecall git history (fork, not our history)
+totalrecall/.git/
+
+# Environment / Local config
+.env
+.env.local
+.env.*.local
+*.local.json
+
+# Vercel
+.vercel
+
+# Optional: uncomment if you don't need the parsed levels
+# original-level-txt-download-images/parsed/

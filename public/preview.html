@@ -1,0 +1,2714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Meelode</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    h1 {
+      color: #ffd700;
+      font-size: clamp(18px, 4vw, 28px);
+      margin: 0;
+    }
+
+    .controls button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #ffd700;
+      color: #1a1a2e;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .controls button:hover {
+      background: #ffed4a;
+    }
+
+    .game-controls {
+      margin-bottom: 10px;
+      padding: 8px 15px;
+      background: #2a4a2e;
+      border-radius: 8px;
+      font-size: clamp(10px, 2vw, 14px);
+      text-align: center;
+    }
+
+    .game-controls kbd {
+      background: #444;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin: 0 2px;
+    }
+
+    #level-container {
+      background: #000;
+      border: 2px solid #444;
+      border-radius: 4px;
+      overflow: hidden;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      max-width: 100%;
+      max-height: calc(100vh - 150px);
+    }
+
+    #level-canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      outline: none;
+      max-width: 100%;
+      max-height: calc(100vh - 150px);
+      object-fit: contain;
+    }
+
+    #game-status {
+      margin-top: 10px;
+      padding: 10px 20px;
+      background: #4a2a4e;
+      border-radius: 8px;
+      font-size: clamp(14px, 3vw, 20px);
+      text-align: center;
+    }
+
+    #game-status.win {
+      background: #2a4a2e;
+      color: #4f4;
+    }
+
+    /* Hidden elements - keep for functionality but don't display */
+    #tile-size, #gold-count, #enemy-count, #stats, #ascii-view, .sprite-preview {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Meelode</h1>
+    <div class="controls">
+      <select id="mode-select">
+        <option value="original">Original Levels</option>
+        <option value="generated">Generated Levels</option>
+      </select>
+      <span id="original-controls">
+        <button id="prev-level-btn">&lt; Prev</button>
+        <span id="level-number">Level 1</span>
+        <button id="next-level-btn">Next &gt;</button>
+      </span>
+      <span id="generated-controls" style="display:none;">
+        <button id="generate-btn">New Level</button>
+      </span>
+    </div>
+  </div>
+
+  <div class="game-controls">
+    <kbd>Arrows</kbd> Move |
+    <kbd>Z</kbd> Dig Left |
+    <kbd>X</kbd> Dig Right
+  </div>
+
+  <div id="level-container">
+    <canvas id="level-canvas" tabindex="0"></canvas>
+  </div>
+
+  <div id="game-status">Lives: 3 | Gold: 0/0</div>
+
+  <!-- Hidden elements for functionality -->
+  <select id="tile-size"><option value="64" selected>64px</option></select>
+  <input type="number" id="gold-count" value="6">
+  <input type="number" id="enemy-count" value="3">
+  <div id="stats"></div>
+  <div class="ascii-level" id="ascii-view"></div>
+  <div class="sprite-preview" id="sprite-preview"></div>
+
+  <script type="module">
+    // Import original levels
+    import ORIGINAL_LEVELS from './original-levels.js';
+
+    // === GAME MODE ===
+    let gameMode = 'original'; // 'original' or 'generated'
+    let currentLevelIndex = 0;
+
+    // === TILE DEFINITIONS ===
+    const TILES = {
+      EMPTY: '.',
+      BRICK: 'b',
+      SOLID: 'B',
+      LADDER: '#',
+      ROPE: '-',
+      GOLD: 'G',
+      ENEMY: 'E',
+      SPAWN: 'M',
+    };
+
+    // Level dimensions - Apple II / Arduboy format (28x16)
+    // Matches original Lode Runner and our training dataset
+    const LEVEL_WIDTH = 28;
+    const LEVEL_HEIGHT = 16;
+
+    // === MOVEMENT CONSTANTS ===
+    const PLAYER_SPEED = 220; // pixels per second
+    const ENEMY_SPEED = 160; // pixels per second (slightly slower than player)
+    const GRAVITY = 1800; // pixels per second squared (snappy, not floaty)
+    const MAX_FALL_SPEED = 600;
+    const ANIMATION_FPS = 12;
+    const ENEMY_THINK_INTERVAL = 0.3; // seconds between AI recalculations
+
+    // === SPRITE PATHS ===
+    const ASSET_BASE = '../assets/sprites/';
+
+    // Animation definitions
+    const ANIMATIONS = {
+      player: {
+        runRight: Array.from({length: 8}, (_, i) => `${ASSET_BASE}entities/player/playerRunRight/playerRunRight${i+1}.png`),
+        runLeft: Array.from({length: 8}, (_, i) => `${ASSET_BASE}entities/player/playerRunLeft/playerRunLeft${i+1}.png`),
+        climb: Array.from({length: 2}, (_, i) => `${ASSET_BASE}entities/player/playerClimb/playerClimb${i+1}.png`),
+        rope: Array.from({length: 2}, (_, i) => `${ASSET_BASE}entities/player/playerRope/playerRope${i+1}.png`),
+      },
+      enemy: {
+        runRight: Array.from({length: 8}, (_, i) => `${ASSET_BASE}entities/enemy/enemyRunRight/alienRunRight${i+1}.png`),
+        runLeft: Array.from({length: 8}, (_, i) => `${ASSET_BASE}entities/enemy/enemyRunLeft/enemyRunLeft${i+1}.png`),
+        climb: Array.from({length: 2}, (_, i) => `${ASSET_BASE}entities/enemy/enemyClimb/enemyClimb${i+1}.png`),
+        rope: Array.from({length: 2}, (_, i) => `${ASSET_BASE}entities/enemy/enemyRope/enemyRope${i+1}.png`),
+      }
+    };
+
+    const TILE_SPRITES = {
+      [TILES.BRICK]: ASSET_BASE + 'tiles/brick.png',
+      [TILES.SOLID]: ASSET_BASE + 'tiles/solid.png',
+      [TILES.LADDER]: ASSET_BASE + 'tiles/ladder.png',
+      [TILES.ROPE]: ASSET_BASE + 'tiles/rope.png',
+    };
+
+    // Tiles that should render as simple colored squares
+    const USE_COLOR_ONLY = new Set([TILES.GOLD]);
+
+    // Colors for tinting 1-bit sprites
+    const COLOR_MAP = {
+      [TILES.EMPTY]: 'transparent',
+      [TILES.BRICK]: '#c87432',
+      [TILES.SOLID]: '#8b6914',
+      [TILES.LADDER]: '#44dd44',
+      [TILES.ROPE]: '#ddaa44',
+      [TILES.GOLD]: '#ffd700',
+      [TILES.ENEMY]: '#ff4466',
+      [TILES.SPAWN]: '#44aaff',
+    };
+
+    const IS_ONE_BIT = true;
+
+    // === SAMPLE LEVELS ===
+    const SAMPLE_LEVELS = [
+      `................................
+..E.G...........................
+bBBbBBbBBBb#bbbbbbB.............
+...........#-----------.........
+...........#....bb#.............
+...........#..E.bb#......G......
+...........#....bb#...bbbbb#bbbb
+...........#....bb#........#....
+...........#....bb#........#....
+...........#....bb#.......G#....
+bbb#bbbbbbbb....bbbbbbbb#bbbbbbb
+...#....................#.......
+...#....................#.......
+...#....................#.......
+bbbbbbbbbbbbbb#bbbbbbbbb#.......
+..............#.........#.......
+..............#.........#.......
+..........E.G.#---------#..G.E..
+......#bbbbbbbbb........bbbbbbb#
+......#........................#
+......#..........M..G..........#
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`,
+    ];
+
+    // === DEBUG MODE ===
+    let DEBUG_SHOW_COLLISION = true; // Toggle with 'D' key
+
+    // === GAME STATE ===
+    let gameState = {
+      player: {
+        x: 0, y: 0,           // Pixel position
+        vx: 0, vy: 0,         // Velocity
+        facingRight: true,
+        state: 'idle',        // idle, running, climbing, rope, falling, trapped
+        animFrame: 0,
+        animTimer: 0,
+        trapped: false,       // Player stuck in a dug hole
+      },
+      enemies: [],
+      goldCollected: 0,
+      totalGold: 0,
+      level: null,
+      baseLevel: null,
+      dugBricks: [],
+      isPlaying: false,
+      tileSize: 32,
+      lives: 3,
+      spawnX: 0,              // Remember spawn for respawn
+      spawnY: 0,
+    };
+
+    // Input state
+    const input = {
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+    };
+
+    // === SPRITE LOADING ===
+    const sprites = {
+      tiles: {},
+      player: {},
+      enemy: {},
+    };
+
+    async function loadSprites() {
+      const promises = [];
+
+      // Load tile sprites
+      for (const [tile, path] of Object.entries(TILE_SPRITES)) {
+        promises.push(loadImage(path).then(img => {
+          sprites.tiles[tile] = img;
+        }));
+      }
+
+      // Load player animations
+      for (const [animName, paths] of Object.entries(ANIMATIONS.player)) {
+        sprites.player[animName] = [];
+        for (const path of paths) {
+          promises.push(loadImage(path).then(img => {
+            const index = parseInt(path.match(/(\d+)\.png$/)[1]) - 1;
+            sprites.player[animName][index] = img;
+          }));
+        }
+      }
+
+      // Load enemy animations
+      for (const [animName, paths] of Object.entries(ANIMATIONS.enemy)) {
+        sprites.enemy[animName] = [];
+        for (const path of paths) {
+          promises.push(loadImage(path).then(img => {
+            const index = parseInt(path.match(/(\d+)\.png$/)[1]) - 1;
+            sprites.enemy[animName][index] = img;
+          }));
+        }
+      }
+
+      await Promise.all(promises);
+      console.log('All sprites loaded');
+    }
+
+    function loadImage(path) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => {
+          console.warn(`Failed to load: ${path}`);
+          resolve(null);
+        };
+        img.src = path;
+      });
+    }
+
+    // === PRE-TRAINED MARKOV MODEL ===
+    // Trained on 592 levels (146 Arduboy + 150 VGLC + horizontal flips)
+    // 136 unique context patterns learned from 342,016 tiles
+    const PRE_TRAINED_MODEL = {"X|X|X":{".":0.694,"#":0.098,"b":0.149,"-":0.032,"B":0.027},"X|.|X":{".":0.96,"#":0.014,"-":0.012,"b":0.012,"B":0.002},"X|#|X":{".":0.561,"b":0.22,"-":0.067,"#":0.152},".|X|X":{".":0.782,"b":0.127,"#":0.074,"-":0.011,"B":0.007},".|.|.":{".":0.95,"#":0.017,"b":0.023,"-":0.008,"B":0.002},"#|.|.":{"#":0.893,"b":0.014,".":0.089,"-":0.001,"B":0.002},".|#|#":{".":0.78,"-":0.035,"b":0.128,"#":0.046,"B":0.012},".|b|.":{"b":0.862,"#":0.055,".":0.067,"-":0.001,"B":0.015},".|#|.":{"b":0.393,".":0.361,"#":0.172,"-":0.044,"B":0.031},"b|X|X":{".":0.214,"b":0.751,"#":0.022,"-":0.004,"B":0.01},"b|.|b":{".":0.878,"b":0.108,"#":0.008,"-":0.004,"B":0.002},"#|.|b":{"#":0.871,".":0.06,"b":0.067,"-":0.001,"B":0.001},"b|#|#":{"-":0.014,".":0.317,"b":0.611,"#":0.047,"B":0.011},"b|-|b":{"-":0.865,"b":0.051,"#":0.025,".":0.058,"B":0.002},".|-|b":{"-":0.674,".":0.12,"#":0.046,"b":0.16},".|-|.":{"-":0.816,".":0.139,"#":0.036,"b":0.008,"B":0.001},"#|-|.":{"#":0.878,"-":0.069,".":0.032,"b":0.019,"B":0.002},"-|#|#":{".":0.846,"b":0.043,"-":0.096,"#":0.008,"B":0.008},"-|.|-":{".":0.928,"b":0.028,"#":0.025,"-":0.016,"B":0.003},"-|b|-":{"b":0.619,"#":0.051,".":0.288,"-":0.015,"B":0.028},"-|#|-":{".":0.76,"b":0.15,"-":0.073,"B":0.017},"#|.|-":{"b":0.039,"#":0.697,".":0.243,"-":0.019,"B":0.003},".|b|#":{"b":0.792,".":0.052,"#":0.139,"-":0.003,"B":0.013},"b|.|.":{"b":0.649,".":0.332,"#":0.007,"-":0.003,"B":0.009},"b|b|b":{"b":0.857,".":0.121,"#":0.012,"-":0.004,"B":0.007},"#|b|b":{"#":0.823,"b":0.157,".":0.017,"-":0.0005,"B":0.002},"#|b|.":{"b":0.583,"#":0.394,".":0.015,"-":0.001,"B":0.007},".|.|b":{".":0.762,"-":0.02,"b":0.168,"#":0.048,"B":0.002},"-|b|#":{"b":0.368,".":0.408,"#":0.092,"-":0.118,"B":0.013},"b|-|.":{"-":0.444,".":0.271,"b":0.259,"#":0.026},"#|-|b":{"#":0.848,"-":0.136,".":0.015},".|b|b":{".":0.625,"b":0.325,"#":0.038,"-":0.008,"B":0.004},"b|b|#":{"b":0.766,".":0.161,"#":0.067,"B":0.006},"#|b|-":{"b":0.459,"#":0.459,".":0.082},"#|X|X":{"#":0.869,"b":0.096,".":0.025,"-":0.002,"B":0.008},".|#|-":{"b":0.397,".":0.429,"#":0.063,"-":0.095,"B":0.016},".|.|#":{".":0.645,"#":0.302,"-":0.011,"b":0.04,"B":0.001},"b|b|.":{"b":0.801,".":0.174,"#":0.012,"-":0.008,"B":0.005},"-|b|.":{"b":0.164,"#":0.06,".":0.754,"-":0.014,"B":0.007},"b|.|#":{".":0.52,"#":0.163,"b":0.306,"-":0.006,"B":0.006},".|b|-":{"b":0.84,".":0.025,"#":0.099,"B":0.037},"-|X|X":{"#":0.24,"b":0.029,".":0.548,"-":0.183},"#|#|.":{"b":0.276,"#":0.386,".":0.305,"-":0.011,"B":0.021},"-|.|.":{".":0.816,"#":0.036,"-":0.146,"b":0.003},".|.|-":{"-":0.22,"b":0.209,".":0.413,"#":0.149,"B":0.009},"-|-|.":{".":0.904,"-":0.08,"#":0.017},"-|.|#":{".":0.937,"-":0.01,"#":0.029,"b":0.024},"#|.|#":{"#":0.434,".":0.545,"b":0.018,"B":0.003},"#|#|#":{".":0.205,"#":0.671,"-":0.004,"b":0.11,"B":0.01},"b|#|b":{"#":0.512,"b":0.247,".":0.195,"-":0.043,"B":0.003},"#|#|b":{".":0.106,"#":0.721,"b":0.158,"B":0.015},"b|#|.":{"b":0.587,".":0.309,"#":0.077,"-":0.014,"B":0.013},"X|b|X":{"b":0.866,"#":0.033,".":0.072,"-":0.001,"B":0.028},"b|#|-":{"b":0.727,".":0.045,"-":0.182,"B":0.045},"-|b|b":{"#":0.098,".":0.773,"-":0.037,"b":0.086,"B":0.006},".|#|b":{".":0.388,"b":0.283,"#":0.283,"-":0.046},"#|b|#":{"b":0.555,"#":0.407,".":0.032,"-":0.006},".|-|#":{"-":0.525,"#":0.262,"b":0.049,".":0.148,"B":0.016},"#|-|#":{"#":0.279,"-":0.605,"b":0.116},"X|-|X":{".":0.144,"#":0.02,"-":0.833,"b":0.003},"-|-|-":{"-":0.814,".":0.151,"b":0.013,"#":0.022},".|-|-":{".":0.705,"#":0.064,"-":0.186,"b":0.038,"B":0.006},"#|-|-":{"-":0.216,"#":0.649,".":0.021,"b":0.093,"B":0.021},"-|#|.":{".":0.902,"-":0.041,"b":0.033,"#":0.016,"B":0.008},"-|-|#":{"-":0.404,".":0.288,"#":0.308},"b|.|-":{"b":0.636,".":0.359,"B":0.005},"b|-|#":{"-":0.783,"b":0.13,".":0.087},"-|.|b":{".":0.717,"b":0.263,"#":0.01,"-":0.01},"b|-|-":{"b":0.115,"-":0.731,"#":0.115,"B":0.019,".":0.019},"b|b|-":{"b":0.35,".":0.65},"#|#|-":{"b":0.2,"-":0.457,".":0.171,"#":0.143,"B":0.029},"-|-|b":{"-":0.905,"#":0.095},"-|#|b":{"-":1},".|B|.":{"B":0.689,"b":0.185,".":0.072,"#":0.051,"-":0.002},"B|.|b":{".":0.822,"B":0.133,"#":0.003,"b":0.042},"B|.|B":{".":0.95,"b":0.013,"B":0.028,"-":0.006,"#":0.003},"b|.|B":{".":0.916,"b":0.06,"B":0.011,"#":0.011,"-":0.002},"B|-|b":{"-":0.879,"B":0.091,".":0.03},".|-|B":{"-":0.733,"#":0.133,".":0.133},"B|-|.":{"-":0.423,"B":0.308,".":0.154,"b":0.077,"#":0.038},"b|-|B":{"-":0.763,"#":0.079,"b":0.158},"B|#|#":{".":0.259,"-":0.018,"B":0.562,"b":0.117,"#":0.044},"#|.|B":{"#":0.888,".":0.092,"b":0.008,"B":0.012},".|B|#":{"B":0.593,"b":0.137,"#":0.147,".":0.118,"-":0.005},"#|B|.":{"b":0.125,"#":0.458,"B":0.407,"-":0.003,".":0.007},"B|X|X":{"B":0.64,"b":0.162,".":0.153,"#":0.036,"-":0.009},"B|B|B":{"b":0.222,"B":0.595,".":0.154,"-":0.019,"#":0.011},"b|b|B":{"b":0.643,"B":0.235,".":0.105,"#":0.017},"B|B|b":{"B":0.589,"b":0.371,".":0.04},"b|B|B":{".":0.262,"B":0.296,"b":0.429,"#":0.003,"-":0.01},".|B|B":{".":0.751,"B":0.087,"-":0.011,"b":0.103,"#":0.047},"B|.|.":{"B":0.642,".":0.237,"b":0.107,"#":0.011,"-":0.002},".|b|B":{"b":0.363,"B":0.099,".":0.484,"#":0.044,"-":0.011},"B|b|.":{"b":0.405,".":0.141,"B":0.442,"#":0.012},"B|b|B":{"b":0.569,"B":0.307,".":0.097,"-":0.015,"#":0.011},"-|B|.":{"B":0.217,"-":0.043,".":0.565,"b":0.13,"#":0.043},"-|B|-":{".":0.235,"b":0.194,"#":0.041,"B":0.531},".|.|B":{".":0.833,"b":0.099,"-":0.017,"#":0.039,"B":0.013},"b|B|b":{"b":0.315,"B":0.554,".":0.116,"-":0.006,"#":0.008},"B|b|b":{"b":0.477,".":0.1,"B":0.402,"-":0.019,"#":0.003},".|B|-":{"B":0.5,"b":0.3,"#":0.2},"X|B|X":{"B":0.719,"b":0.183,".":0.099},"b|B|#":{"b":0.351,"B":0.378,".":0.054,"#":0.216},"b|B|.":{"B":0.487,"b":0.395,".":0.118},"#|B|b":{".":0.017,"B":0.12,"#":0.803,"b":0.06},"B|B|.":{"b":0.22,"B":0.744,".":0.037},".|B|b":{"B":0.268,".":0.558,"b":0.123,"#":0.051},"B|#|B":{"-":0.2,"#":0.489,".":0.156,"b":0.067,"B":0.089},"B|-|B":{"-":0.892,"#":0.03,"b":0.013,"B":0.023,".":0.043},"b|#|B":{".":0.4,"#":0.4,"b":0.2},"#|b|B":{"b":0.145,"#":0.806,"B":0.04,".":0.008},"#|-|B":{"#":0.833,"-":0.111,".":0.056},"#|B|B":{"#":0.923,".":0.008,"B":0.025,"b":0.044},"-|b|B":{"B":0.333,"-":0.333,".":0.333},"b|B|-":{"b":1},"B|b|#":{"b":0.419,"B":0.535,".":0.047},"B|#|b":{"b":0.25,".":0.375,"#":0.125,"-":0.188,"B":0.063},"B|B|-":{"b":0.5,"B":0.5},"B|#|.":{"B":0.611,"b":0.148,".":0.167,"-":0.037,"#":0.037},"B|.|#":{"B":0.089,".":0.511,"#":0.356,"b":0.022,"-":0.022},"-|B|B":{".":0.667,"-":0.083,"b":0.042,"#":0.167,"B":0.042},"B|.|-":{"B":0.727,".":0.227,"b":0.045},"B|B|#":{"b":0.094,"B":0.245,".":0.057,"#":0.604},"B|-|-":{"b":0.143,"B":0.286,"-":0.286,"#":0.286},"B|b|-":{"B":1},"-|B|b":{"-":0.333,"#":0.333,".":0.333},"#|B|#":{"B":0.255,"#":0.66,".":0.085},"#|#|B":{"#":0.442,"B":0.372,".":0.186},"B|#|-":{"B":0.333,"#":0.556,"b":0.111},"B|-|#":{"-":1},"-|-|B":{"-":1},"-|#|B":{"-":1}};
+
+    // === MARKOV GENERATOR ===
+    class SimpleMarkovGenerator {
+      constructor() {
+        this.transitions = new Map();
+      }
+
+      getContextKey(above, left, aboveLeft) {
+        return `${above ?? 'X'}|${left ?? 'X'}|${aboveLeft ?? 'X'}`;
+      }
+
+      // Load pre-trained model from JSON object
+      loadPreTrainedModel(modelData) {
+        this.transitions.clear();
+        for (const [contextKey, tileProbabilities] of Object.entries(modelData)) {
+          const tileMap = new Map();
+          for (const [tile, prob] of Object.entries(tileProbabilities)) {
+            tileMap.set(tile, prob);
+          }
+          this.transitions.set(contextKey, tileMap);
+        }
+        console.log(`Loaded pre-trained model with ${this.transitions.size} patterns`);
+      }
+
+      train(levels) {
+        this.transitions.clear();
+
+        for (const levelStr of levels) {
+          const level = levelStr.trim().split('\n').map(row => [...row]);
+
+          for (let y = 0; y < level.length; y++) {
+            for (let x = 0; x < level[y].length; x++) {
+              let tile = level[y][x];
+              if (['G', 'E', 'M'].includes(tile)) tile = '.';
+
+              const above = y > 0 ? level[y-1][x] : null;
+              const left = x > 0 ? level[y][x-1] : null;
+              const aboveLeft = (y > 0 && x > 0) ? level[y-1][x-1] : null;
+
+              const norm = t => ['G', 'E', 'M'].includes(t) ? '.' : t;
+              const key = this.getContextKey(norm(above), norm(left), norm(aboveLeft));
+
+              if (!this.transitions.has(key)) {
+                this.transitions.set(key, new Map());
+              }
+              const tileMap = this.transitions.get(key);
+              tileMap.set(tile, (tileMap.get(tile) || 0) + 1);
+            }
+          }
+        }
+
+        for (const [_, tileMap] of this.transitions) {
+          let total = 0;
+          for (const count of tileMap.values()) total += count;
+          for (const [tile, count] of tileMap) {
+            tileMap.set(tile, count / total);
+          }
+        }
+      }
+
+      sampleTile(above, left, aboveLeft) {
+        const key = this.getContextKey(above, left, aboveLeft);
+        const tileMap = this.transitions.get(key);
+
+        if (!tileMap || tileMap.size === 0) {
+          const r = Math.random();
+          if (r < 0.6) return '.';
+          if (r < 0.8) return 'b';
+          if (r < 0.9) return '#';
+          if (r < 0.95) return 'B';
+          return '-';
+        }
+
+        const r = Math.random();
+        let cumulative = 0;
+        for (const [tile, prob] of tileMap) {
+          cumulative += prob;
+          if (r <= cumulative) return tile;
+        }
+        return '.';
+      }
+
+      generate(width = 32, height = 22) {
+        const level = [];
+        for (let y = 0; y < height; y++) {
+          level.push(new Array(width).fill('.'));
+        }
+
+        // Bottom row is diggable bricks (like original Lode Runner)
+        for (let x = 0; x < width; x++) {
+          level[height - 1][x] = 'b';
+        }
+
+        for (let y = 0; y < height - 1; y++) {
+          for (let x = 0; x < width; x++) {
+            const above = y > 0 ? level[y-1][x] : null;
+            const left = x > 0 ? level[y][x-1] : null;
+            const aboveLeft = (y > 0 && x > 0) ? level[y-1][x-1] : null;
+            level[y][x] = this.sampleTile(above, left, aboveLeft);
+          }
+        }
+
+        return level;
+      }
+    }
+
+    // === CONSTRUCTIVE GENERATOR ===
+    function generateConstructive(width = 32, height = 22) {
+      const level = [];
+      for (let y = 0; y < height; y++) {
+        level.push(new Array(width).fill('.'));
+      }
+
+      // Bottom row is diggable bricks (like original Lode Runner)
+      for (let x = 0; x < width; x++) {
+        level[height - 1][x] = 'b';
+      }
+
+      const platformCount = 3 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < platformCount; i++) {
+        const y = 2 + Math.floor(Math.random() * (height - 6));
+        const startX = Math.floor(Math.random() * (width - 10));
+        const platformWidth = 5 + Math.floor(Math.random() * 15);
+
+        for (let x = startX; x < Math.min(startX + platformWidth, width); x++) {
+          level[y][x] = Math.random() < 0.8 ? 'b' : 'B';
+        }
+      }
+
+      const ladderCount = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < ladderCount; i++) {
+        const x = 2 + Math.floor(Math.random() * (width - 4));
+        const startY = 1 + Math.floor(Math.random() * (height - 8));
+        const ladderHeight = 4 + Math.floor(Math.random() * 8);
+
+        for (let y = startY; y < Math.min(startY + ladderHeight, height - 1); y++) {
+          if (level[y][x] === '.') {
+            level[y][x] = '#';
+          }
+        }
+      }
+
+      const ropeCount = Math.floor(Math.random() * 3);
+      for (let i = 0; i < ropeCount; i++) {
+        const y = 1 + Math.floor(Math.random() * Math.floor(height / 2));
+        const startX = Math.floor(Math.random() * (width - 8));
+        const ropeWidth = 4 + Math.floor(Math.random() * 10);
+
+        for (let x = startX; x < Math.min(startX + ropeWidth, width); x++) {
+          if (level[y][x] === '.') {
+            level[y][x] = '-';
+          }
+        }
+      }
+
+      return level;
+    }
+
+    // === REACHABILITY CHECK ===
+    // This checks if positions are ACTUALLY reachable respecting game physics
+    function getReachablePositions(level, startX, startY) {
+      const reachable = new Set();
+      const visited = new Set();
+      const height = level.length;
+      const width = level[0].length;
+
+      const isPassable = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        const t = level[y][x];
+        return t === '.' || t === '#' || t === '-' || t === 'G' || t === 'E' || t === 'M';
+      };
+
+      const isSolid = (x, y) => {
+        if (x < 0 || x >= width || y >= height) return true; // Out of bounds = solid
+        if (y < 0) return false; // Above level = not solid
+        const t = level[y][x];
+        return t === 'b' || t === 'B';
+      };
+
+      const isLadder = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return level[y][x] === '#';
+      };
+
+      const isRope = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return level[y][x] === '-';
+      };
+
+      // Can the player stand/hang at this position?
+      const canOccupy = (x, y) => {
+        if (!isPassable(x, y)) return false;
+        // Can stand if: solid ground below, OR on ladder, OR on rope, OR ladder below (standing on ladder top)
+        return isSolid(x, y + 1) || isLadder(x, y) || isRope(x, y) || isLadder(x, y + 1);
+      };
+
+      // BFS with physics-aware movement
+      const queue = [{ x: startX, y: startY }];
+
+      while (queue.length > 0) {
+        const { x, y } = queue.shift();
+        const key = `${x},${y}`;
+        if (visited.has(key)) continue;
+        if (!canOccupy(x, y)) continue; // Can't actually be here
+        visited.add(key);
+        reachable.add(key);
+
+        const onLadder = isLadder(x, y);
+        const onRope = isRope(x, y);
+        const onGround = isSolid(x, y + 1) || isLadder(x, y + 1);
+
+        // HORIZONTAL movement - only if we have ground/ladder/rope to stand on
+        if (onGround || onLadder || onRope) {
+          // Move left - need ground/ladder/rope at destination too, OR we'll fall to valid spot
+          if (isPassable(x - 1, y)) {
+            // Check if destination has support, or if falling from there leads somewhere valid
+            if (canOccupy(x - 1, y)) {
+              queue.push({ x: x - 1, y });
+            } else {
+              // We'd fall - trace the fall to see where we land
+              let fallY = y;
+              while (fallY + 1 < height && isPassable(x - 1, fallY + 1) && !isRope(x - 1, fallY)) {
+                fallY++;
+              }
+              if (canOccupy(x - 1, fallY)) {
+                queue.push({ x: x - 1, y: fallY });
+              }
+            }
+          }
+          // Move right - same logic
+          if (isPassable(x + 1, y)) {
+            if (canOccupy(x + 1, y)) {
+              queue.push({ x: x + 1, y });
+            } else {
+              let fallY = y;
+              while (fallY + 1 < height && isPassable(x + 1, fallY + 1) && !isRope(x + 1, fallY)) {
+                fallY++;
+              }
+              if (canOccupy(x + 1, fallY)) {
+                queue.push({ x: x + 1, y: fallY });
+              }
+            }
+          }
+        }
+
+        // CLIMB UP - only on ladders
+        if (onLadder && isPassable(x, y - 1)) {
+          queue.push({ x, y: y - 1 });
+        }
+
+        // CLIMB/FALL DOWN - if passable below
+        if (isPassable(x, y + 1)) {
+          // If there's a ladder below, we can climb down
+          if (isLadder(x, y + 1)) {
+            queue.push({ x, y: y + 1 });
+          }
+          // If we're on rope, we can drop down
+          else if (onRope) {
+            // Trace the fall
+            let fallY = y + 1;
+            while (fallY + 1 < height && isPassable(x, fallY + 1) && !isRope(x, fallY)) {
+              fallY++;
+            }
+            if (canOccupy(x, fallY)) {
+              queue.push({ x, y: fallY });
+            }
+          }
+          // If on ground and there's a ladder below, can climb down into it
+          else if (onGround && isLadder(x, y + 1)) {
+            queue.push({ x, y: y + 1 });
+          }
+        }
+
+        // DIG AND FALL - can dig brick diagonally below and fall through
+        // This opens up more reachability through digging
+        const canDigAndFall = (digX) => {
+          if (digX < 0 || digX >= width) return;
+          const digY = y + 1;
+          if (digY >= height) return;
+          // Can only dig regular bricks, not solid blocks
+          if (level[digY][digX] !== 'b') return;
+          // After digging, we can move there and fall through
+          // Trace where we'd land
+          let fallY = digY;
+          while (fallY + 1 < height && (isPassable(digX, fallY + 1) || level[fallY + 1][digX] === 'b')) {
+            // If we hit a brick while falling, we'd stop ON TOP of it (the dug hole refills)
+            // For reachability, consider we can get to the tile below the dug brick
+            if (level[fallY + 1][digX] === 'b') {
+              // We'd land on this brick after digging and falling
+              break;
+            }
+            fallY++;
+          }
+          if (canOccupy(digX, fallY) || isSolid(digX, fallY + 1)) {
+            queue.push({ x: digX, y: fallY });
+          }
+        };
+
+        // Can dig if we're standing on solid ground (not ladder/rope)
+        if (onGround && !onLadder && !onRope) {
+          canDigAndFall(x - 1); // Dig left
+          canDigAndFall(x + 1); // Dig right
+        }
+      }
+
+      return reachable;
+    }
+
+    // === ENTITY PLACEMENT ===
+    function placeEntities(level, goldCount, enemyCount) {
+      const height = level.length;
+      const width = level[0].length;
+
+      const isSolid = (x, y) => {
+        if (x < 0 || x >= width || y >= height) return true;
+        if (y < 0) return false;
+        const t = level[y][x];
+        return t === 'b' || t === 'B';
+      };
+
+      const isDiggable = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return level[y][x] === 'b';
+      };
+
+      const isPassable = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        const t = level[y][x];
+        return t === '.' || t === '#' || t === '-' || t === 'G' || t === 'E' || t === 'M';
+      };
+
+      const isLadder = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false;
+        return level[y][x] === '#';
+      };
+
+      // Find all valid spawn positions (empty tile with solid ground)
+      const validPositions = [];
+      for (let y = 0; y < height - 1; y++) {
+        for (let x = 0; x < width; x++) {
+          const tile = level[y][x];
+          const below = y + 1 < height ? level[y + 1][x] : 'B';
+
+          const hasSolidGround = below === 'b' || below === 'B';
+          const isEmpty = tile === '.';
+
+          if (isEmpty && hasSolidGround) {
+            validPositions.push({ x, y });
+          }
+        }
+      }
+
+      if (validPositions.length === 0) return { level, spawn: null, enemies: [], goldPositions: [] };
+
+      // Score positions for player spawn - prefer positions with escape routes
+      const scoreSpawnPosition = (pos) => {
+        let score = 0;
+        const { x, y } = pos;
+
+        // Prefer diggable ground (can dig escape routes)
+        if (isDiggable(x, y + 1)) score += 3;
+        if (isDiggable(x - 1, y + 1)) score += 2;
+        if (isDiggable(x + 1, y + 1)) score += 2;
+
+        // Prefer positions with clear horizontal movement (not boxed in)
+        if (isPassable(x - 1, y)) score += 2;
+        if (isPassable(x + 1, y)) score += 2;
+
+        // Bonus if there's a ladder nearby for escape
+        for (let dx = -3; dx <= 3; dx++) {
+          for (let dy = -2; dy <= 2; dy++) {
+            if (isLadder(x + dx, y + dy)) score += 1;
+          }
+        }
+
+        // Prefer lower positions (more level to explore above)
+        score += y * 0.5;
+
+        // Penalize positions right against walls
+        if (x <= 1 || x >= width - 2) score -= 3;
+
+        return score;
+      };
+
+      // Sort by score and pick best spawn with some randomness
+      validPositions.forEach(p => p.score = scoreSpawnPosition(p));
+      validPositions.sort((a, b) => b.score - a.score);
+
+      // Try to find a spawn with good reachability
+      // We need enough reachable positions for gold + enemies + some buffer
+      const MIN_REACHABLE = Math.max(goldCount + enemyCount + 3, 10);
+      let spawn = null;
+      let reachable = null;
+      let reachablePositions = [];
+
+      // Try top spawn candidates until we find one with good reachability
+      const candidateCount = Math.min(validPositions.length, 20); // Check up to 20 candidates
+      for (let i = 0; i < candidateCount; i++) {
+        const candidate = validPositions[i];
+
+        // Temporarily mark as spawn to check reachability
+        const origTile = level[candidate.y][candidate.x];
+        level[candidate.y][candidate.x] = 'M';
+
+        const testReachable = getReachablePositions(level, candidate.x, candidate.y);
+        const testReachablePositions = validPositions.filter(p =>
+          p !== candidate && testReachable.has(`${p.x},${p.y}`) && level[p.y][p.x] === '.'
+        );
+
+        // Restore tile
+        level[candidate.y][candidate.x] = origTile;
+
+        // Check if this spawn has enough reachable area
+        if (testReachablePositions.length >= MIN_REACHABLE || i === candidateCount - 1) {
+          spawn = candidate;
+          reachable = testReachable;
+          reachablePositions = testReachablePositions;
+
+          // Remove spawn from valid positions
+          const spawnIdx = validPositions.indexOf(spawn);
+          if (spawnIdx !== -1) validPositions.splice(spawnIdx, 1);
+
+          // Mark the actual spawn
+          level[spawn.y][spawn.x] = 'M';
+
+          console.log(`Spawn at (${spawn.x},${spawn.y}) has ${testReachablePositions.length} reachable positions (tried ${i + 1} candidates)`);
+          break;
+        }
+      }
+
+      if (!spawn) {
+        // Fallback - use first valid position
+        spawn = validPositions.shift();
+        level[spawn.y][spawn.x] = 'M';
+        reachable = getReachablePositions(level, spawn.x, spawn.y);
+        reachablePositions = validPositions.filter(p =>
+          reachable.has(`${p.x},${p.y}`) && level[p.y][p.x] === '.'
+        );
+      }
+
+      // Place gold first - spread them out
+      const goldPositions = [];
+      const goldToPlace = Math.min(goldCount, reachablePositions.length);
+
+      // Shuffle for initial randomness
+      reachablePositions.sort(() => Math.random() - 0.5);
+
+      for (let i = 0; i < goldToPlace; i++) {
+        if (reachablePositions.length === 0) break;
+
+        // Find position furthest from existing gold (and spawn)
+        let bestIdx = 0;
+        let bestMinDist = -1;
+
+        const placed = [...goldPositions, spawn];
+
+        for (let j = 0; j < Math.min(reachablePositions.length, 20); j++) {
+          const pos = reachablePositions[j];
+          let minDist = Infinity;
+
+          for (const other of placed) {
+            const dist = Math.abs(pos.x - other.x) + Math.abs(pos.y - other.y);
+            minDist = Math.min(minDist, dist);
+          }
+
+          if (minDist > bestMinDist) {
+            bestMinDist = minDist;
+            bestIdx = j;
+          }
+        }
+
+        const pos = reachablePositions.splice(bestIdx, 1)[0];
+        level[pos.y][pos.x] = 'G';
+        goldPositions.push({ x: pos.x, y: pos.y });
+      }
+
+      // Place enemies with smart heuristics
+      const enemies = [];
+      const enemiesToPlace = Math.min(enemyCount, reachablePositions.length);
+
+      // Calculate "safe zone" around player spawn - enemies shouldn't start too close
+      const SAFE_RADIUS = 5;
+      const MIN_ENEMY_SPACING = 4;
+
+      // Check if a position has mobility - enemy can actually move from here
+      // This prevents spawning enemies in pits they can't escape
+      const hasMobility = (x, y) => {
+        // Can move left?
+        const canLeft = isPassable(x - 1, y);
+        // Can move right?
+        const canRight = isPassable(x + 1, y);
+        // On a ladder (can climb)?
+        const onLadder = level[y][x] === '#';
+        // Ladder below (can climb down)?
+        const ladderBelow = y + 1 < height && level[y + 1][x] === '#';
+        // Ladder above (can climb up)?
+        const ladderAbove = y > 0 && level[y - 1][x] === '#';
+        // On rope (can move horizontally)?
+        const onRope = level[y][x] === '-';
+
+        // Must have at least some way to move
+        if (!canLeft && !canRight && !onLadder && !ladderBelow && !onRope) {
+          return false;
+        }
+
+        // Extra check: if can only move one direction horizontally and no ladder,
+        // make sure that direction actually leads somewhere useful
+        if (!onLadder && !ladderBelow && !ladderAbove && !onRope) {
+          // Count how many tiles we can walk before hitting a wall
+          let walkableLeft = 0;
+          let walkableRight = 0;
+
+          for (let dx = 1; dx <= 5; dx++) {
+            if (isPassable(x - dx, y) && (isSolid(x - dx, y + 1) || level[y + 1][x - dx] === '#')) {
+              walkableLeft++;
+              // Check if there's a ladder in this direction
+              if (level[y][x - dx] === '#' || level[y + 1][x - dx] === '#') {
+                walkableLeft += 10; // Ladder access is great
+                break;
+              }
+            } else break;
+          }
+
+          for (let dx = 1; dx <= 5; dx++) {
+            if (isPassable(x + dx, y) && (isSolid(x + dx, y + 1) || level[y + 1][x + dx] === '#')) {
+              walkableRight++;
+              // Check if there's a ladder in this direction
+              if (level[y][x + dx] === '#' || level[y + 1][x + dx] === '#') {
+                walkableRight += 10; // Ladder access is great
+                break;
+              }
+            } else break;
+          }
+
+          // If very limited mobility (trapped in small area with no ladder access), reject
+          if (walkableLeft + walkableRight < 3) {
+            return false;
+          }
+        }
+
+        return true;
+      };
+
+      // Filter reachable positions to only those with mobility
+      const mobilePositions = reachablePositions.filter(p => hasMobility(p.x, p.y));
+
+      // Score enemy positions
+      const scoreEnemyPosition = (pos, existingEnemies) => {
+        let score = 0;
+        const { x, y } = pos;
+
+        // Distance from player spawn - not too close, not too far
+        const distFromSpawn = Math.abs(x - spawn.x) + Math.abs(y - spawn.y);
+        if (distFromSpawn < SAFE_RADIUS) {
+          score -= 100; // Heavy penalty for being too close to spawn
+        } else if (distFromSpawn < SAFE_RADIUS * 2) {
+          score += 5; // Good - challenging but fair
+        } else {
+          score += 2; // OK - gives player time
+        }
+
+        // Check if this would trap the player (enemies on both sides on non-diggable ground)
+        const playerOnSolidBlock = !isDiggable(spawn.x, spawn.y + 1);
+        if (playerOnSolidBlock) {
+          // If player can't dig, make sure enemies aren't blocking both sides
+          const wouldBlockLeft = x < spawn.x && y === spawn.y;
+          const wouldBlockRight = x > spawn.x && y === spawn.y;
+          const existingBlocksLeft = existingEnemies.some(e => e.x < spawn.x && e.y === spawn.y);
+          const existingBlocksRight = existingEnemies.some(e => e.x > spawn.x && e.y === spawn.y);
+
+          if ((wouldBlockLeft && existingBlocksRight) || (wouldBlockRight && existingBlocksLeft)) {
+            score -= 200; // Would create impossible situation
+          }
+        }
+
+        // Same platform level as spawn is dangerous if no dig escape
+        if (y === spawn.y && !isDiggable(spawn.x, spawn.y + 1)) {
+          score -= 20;
+        }
+
+        // Prefer enemies on different vertical levels
+        const existingOnSameLevel = existingEnemies.filter(e => e.y === y).length;
+        score -= existingOnSameLevel * 10;
+
+        // Spread enemies apart
+        for (const other of existingEnemies) {
+          const dist = Math.abs(x - other.x) + Math.abs(y - other.y);
+          if (dist < MIN_ENEMY_SPACING) {
+            score -= (MIN_ENEMY_SPACING - dist) * 5;
+          }
+        }
+
+        // Enemies near ladders are more interesting (can chase vertically)
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = -2; dy <= 2; dy++) {
+            if (isLadder(x + dx, y + dy)) score += 1;
+          }
+        }
+
+        return score;
+      };
+
+      // Place enemies one by one, updating scores after each
+      // Use mobilePositions to ensure enemies can actually move from spawn
+      for (let i = 0; i < enemiesToPlace; i++) {
+        if (mobilePositions.length === 0) break;
+
+        // Score all remaining positions
+        mobilePositions.forEach(p => p.enemyScore = scoreEnemyPosition(p, enemies));
+        mobilePositions.sort((a, b) => b.enemyScore - a.enemyScore);
+
+        // Pick from top candidates with some randomness
+        const topEnemyCount = Math.max(1, Math.floor(mobilePositions.length * 0.3));
+        const enemyIdx = Math.floor(Math.random() * topEnemyCount);
+        const pos = mobilePositions.splice(enemyIdx, 1)[0];
+
+        // Skip if score is too low (would create bad situation)
+        if (pos.enemyScore < -50) {
+          console.log(`Skipping enemy placement at (${pos.x},${pos.y}) - score too low: ${pos.enemyScore}`);
+          continue;
+        }
+
+        level[pos.y][pos.x] = 'E';
+        enemies.push({ x: pos.x, y: pos.y, facingRight: Math.random() > 0.5 });
+      }
+
+      return { level, spawn, enemies, goldPositions };
+    }
+
+    // === GAME LOGIC ===
+
+    function getTileAt(pixelX, pixelY) {
+      const tileX = Math.floor(pixelX / gameState.tileSize);
+      const tileY = Math.floor(pixelY / gameState.tileSize);
+      return getTile(tileX, tileY);
+    }
+
+    function getTile(tileX, tileY) {
+      if (tileX < 0 || tileX >= LEVEL_WIDTH || tileY < 0 || tileY >= LEVEL_HEIGHT) return TILES.SOLID;
+      const isDug = gameState.dugBricks.some(b => b.x === tileX && b.y === tileY);
+      if (isDug) return TILES.EMPTY;
+      return gameState.baseLevel[tileY][tileX];
+    }
+
+    function isSolidTile(tile) {
+      return tile === TILES.BRICK || tile === TILES.SOLID;
+    }
+
+    function isPassableTile(tile) {
+      return tile === TILES.EMPTY || tile === TILES.LADDER || tile === TILES.ROPE ||
+             tile === TILES.GOLD || tile === TILES.SPAWN || tile === TILES.ENEMY;
+    }
+
+    // Check if there's a trapped enemy at a given tile position
+    // excludeEnemy: optional enemy to exclude from the check (so an enemy doesn't count itself)
+    function hasTrappedEnemyAt(tileX, tileY, excludeEnemy = null) {
+      const tileSize = gameState.tileSize;
+      for (const enemy of gameState.enemies) {
+        if (!enemy.trapped) continue;
+        if (excludeEnemy && enemy === excludeEnemy) continue;
+        const enemyTileX = Math.floor((enemy.x + tileSize / 2) / tileSize);
+        const enemyTileY = Math.floor((enemy.y + tileSize / 2) / tileSize);
+        if (enemyTileX === tileX && enemyTileY === tileY) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Check if position is solid OR has a trapped enemy (for ground detection)
+    // excludeEnemy: optional enemy to exclude from trapped enemy check (so an enemy doesn't count itself)
+    function isSolidOrTrappedEnemy(tileX, tileY, excludeEnemy = null) {
+      const tile = getTile(tileX, tileY);
+      if (isSolidTile(tile)) return true;
+      // Trapped enemies act as solid ground
+      if (hasTrappedEnemyAt(tileX, tileY, excludeEnemy)) return true;
+      return false;
+    }
+
+    function killPlayer() {
+      const tileSize = gameState.tileSize;
+      gameState.lives--;
+
+      if (gameState.lives <= 0) {
+        // Game over
+        gameState.isPlaying = false;
+        document.getElementById('game-status').textContent = 'GAME OVER! No lives remaining. Click New Level to try again.';
+        document.getElementById('game-status').className = '';
+        return;
+      }
+
+      // Respawn at original spawn point
+      gameState.player.x = gameState.spawnX * tileSize;
+      gameState.player.y = gameState.spawnY * tileSize;
+      gameState.player.vx = 0;
+      gameState.player.vy = 0;
+      gameState.player.trapped = false;
+      gameState.player.state = 'idle';
+
+      document.getElementById('game-status').textContent = `Lost a life! Lives: ${gameState.lives} | Gold: ${gameState.goldCollected}/${gameState.totalGold}`;
+    }
+
+    function updatePlayer(dt) {
+      const player = gameState.player;
+      const tileSize = gameState.tileSize;
+
+      // Get current tile position (center of player)
+      const centerX = player.x + tileSize / 2;
+      const centerY = player.y + tileSize / 2;
+      const tileX = Math.floor(centerX / tileSize);
+      const tileY = Math.floor(centerY / tileSize);
+      const currentTile = getTile(tileX, tileY);
+
+      // Check if player is trapped in a dug hole
+      if (player.trapped) {
+        const dugBrick = gameState.dugBricks.find(b => b.x === tileX && b.y === tileY);
+
+        if (!dugBrick) {
+          // Brick regenerated on player - they die!
+          killPlayer();
+          return;
+        }
+
+        // Player is stuck - can't move, just animate struggling
+        player.state = 'trapped';
+        player.animTimer += dt;
+        const frameTime = 1 / ANIMATION_FPS;
+        if (player.animTimer >= frameTime) {
+          player.animTimer -= frameTime;
+          player.animFrame++;
+        }
+        return;
+      }
+
+      // Check if player just fell into a dug hole
+      const inDugHole = gameState.dugBricks.some(b => b.x === tileX && b.y === tileY);
+      if (inDugHole) {
+        // Snap to hole and become trapped
+        player.x = tileX * tileSize;
+        player.y = tileY * tileSize;
+        player.trapped = true;
+        player.vx = 0;
+        player.vy = 0;
+        player.state = 'trapped';
+        return;
+      }
+
+      // Check tile at player's feet (inside the player hitbox)
+      const playerFeetY = player.y + tileSize - 1;
+      const playerFeetTileY = Math.floor(playerFeetY / tileSize);
+      const tileAtFeet = getTile(tileX, playerFeetTileY);
+
+      // Check tile below player (outside/under the player hitbox)
+      const belowY = player.y + tileSize;
+      const belowTileY = Math.floor(belowY / tileSize);
+      const tileBelow = getTile(tileX, belowTileY);
+
+      // Determine if on ladder or rope - check BOTH center AND feet position
+      // This allows climbing all the way up until feet leave the ladder
+      const onLadder = currentTile === TILES.LADDER || tileAtFeet === TILES.LADDER;
+      const onRope = currentTile === TILES.ROPE || tileAtFeet === TILES.ROPE;
+      // Ground includes solid tiles AND trapped enemies (can walk over them)
+      const onGround = isSolidOrTrappedEnemy(tileX, belowTileY) || (belowTileY >= LEVEL_HEIGHT);
+
+      // Also check if standing on top of a ladder
+      const onLadderTop = tileBelow === TILES.LADDER;
+
+      // Reset velocity based on state
+      let newVx = 0;
+      let newVy = player.vy;
+      let newState = 'idle';
+
+      // Horizontal movement
+      if (input.left) {
+        newVx = -PLAYER_SPEED;
+        player.facingRight = false;
+      } else if (input.right) {
+        newVx = PLAYER_SPEED;
+        player.facingRight = true;
+      }
+
+      // Vertical movement on ladder
+      if (onLadder) {
+        newVy = 0; // Cancel gravity on ladder
+        if (input.up) {
+          newVy = -PLAYER_SPEED;
+          newState = 'climbing';
+        } else if (input.down) {
+          newVy = PLAYER_SPEED;
+          newState = 'climbing';
+        } else if (newVx !== 0) {
+          newState = 'running';
+        } else {
+          newState = 'climbing'; // Idle on ladder shows climb sprite
+        }
+      }
+      // Rope movement
+      else if (onRope) {
+        newVy = 0; // Hang on rope
+        if (input.down) {
+          // Drop from rope
+          newVy = PLAYER_SPEED * 0.5;
+        }
+        newState = 'rope';
+      }
+      // Normal ground/air movement
+      else {
+        // Can climb up if there's a ladder at our position or above
+        if (input.up && (currentTile === TILES.LADDER || getTile(tileX, tileY - 1) === TILES.LADDER)) {
+          newVy = -PLAYER_SPEED;
+          newState = 'climbing';
+        }
+        // Can climb down if on ground and there's a ladder below
+        else if (input.down && (onGround || onLadderTop) && tileBelow === TILES.LADDER) {
+          newVy = PLAYER_SPEED;
+          newState = 'climbing';
+        }
+        // Apply gravity if not on ground
+        else if (!onGround && !onLadderTop) {
+          newVy += GRAVITY * dt;
+          newVy = Math.min(newVy, MAX_FALL_SPEED);
+          newState = 'falling';
+        } else {
+          newVy = 0;
+          if (newVx !== 0) {
+            newState = 'running';
+          }
+        }
+      }
+
+      // Apply velocity
+      player.vx = newVx;
+      player.vy = newVy;
+
+      // Move horizontally
+      if (player.vx !== 0) {
+        const newX = player.x + player.vx * dt;
+
+        // Check collision - use a larger margin on top to allow fitting through 1-tile gaps
+        // This helps exiting ladders even when there's a ceiling nearby
+        const COLLISION_MARGIN_TOP = tileSize * 0.35; // 35% of tile size from top
+        // Use a margin on bottom to avoid checking the tile row we're standing on
+        // This prevents getting stuck when standing on bricks next to ladders
+        const COLLISION_MARGIN_BOTTOM = tileSize * 0.1; // 10% margin from bottom
+        const testX = player.vx > 0 ? newX + tileSize - 1 : newX;
+        const testTileX = Math.floor(testX / tileSize);
+
+        // Check both top and bottom of player (with margin on top and bottom)
+        const topTile = getTile(testTileX, Math.floor((player.y + COLLISION_MARGIN_TOP) / tileSize));
+        const bottomTile = getTile(testTileX, Math.floor((player.y + tileSize - 1 - COLLISION_MARGIN_BOTTOM) / tileSize));
+
+        if (isPassableTile(topTile) && isPassableTile(bottomTile) && newX >= 0 && newX + tileSize <= LEVEL_WIDTH * tileSize) {
+          player.x = newX;
+        }
+      }
+
+      // Move vertically
+      if (player.vy !== 0) {
+        const newY = player.y + player.vy * dt;
+
+        if (player.vy > 0) {
+          // Moving down - check for ground collision and rope grabbing
+          const testY = newY + tileSize; // Check where feet will be
+          const testTileY = Math.floor(testY / tileSize);
+          const centerTileX = Math.floor((player.x + tileSize / 2) / tileSize);
+          const tileAtFeet = getTile(centerTileX, testTileY);
+
+          // Check for rope at center position (where hands would grab)
+          const centerY = newY + tileSize / 2;
+          const centerTileY = Math.floor(centerY / tileSize);
+          const tileAtCenter = getTile(centerTileX, centerTileY);
+
+          // Check if there's a trapped enemy we'd land on
+          const trappedEnemyBelow = hasTrappedEnemyAt(centerTileX, testTileY);
+
+          if (newY + tileSize <= LEVEL_HEIGHT * tileSize) {
+            // Check if we're falling through a rope - grab it!
+            if (tileAtCenter === TILES.ROPE && player.state === 'falling') {
+              // Snap to rope - center player on the rope tile
+              player.y = centerTileY * tileSize;
+              player.vy = 0;
+              player.state = 'rope';
+            }
+            // Can move down if destination is passable or is a ladder we can climb into
+            // BUT stop if there's a trapped enemy (acts as ground)
+            else if ((isPassableTile(tileAtFeet) || tileAtFeet === TILES.LADDER) && !trappedEnemyBelow) {
+              player.y = newY;
+            } else {
+              // Land on ground (or trapped enemy) - snap to tile
+              player.y = testTileY * tileSize - tileSize;
+              player.vy = 0;
+            }
+          }
+        } else {
+          // Moving up (climbing)
+          const centerTileX = Math.floor((player.x + tileSize / 2) / tileSize);
+
+          // Check where the player's feet will be after moving
+          const newFeetY = newY + tileSize - 1;
+          const newFeetTileY = Math.floor(newFeetY / tileSize);
+          const tileAtNewFeet = getTile(centerTileX, newFeetTileY);
+
+          // Check where head will be
+          const testTileY = Math.floor(newY / tileSize);
+          const tileAtHead = getTile(centerTileX, testTileY);
+
+          // Can climb up if:
+          // 1. The tile at head is passable (normal case), OR
+          // 2. We're still on a ladder (feet are on ladder) - allows climbing to top of ladder
+          //    even when there's a solid block above
+          const feetOnLadder = tileAtNewFeet === TILES.LADDER;
+          const headClear = isPassableTile(tileAtHead);
+
+          if ((headClear || feetOnLadder) && newY >= 0) {
+            player.y = newY;
+          }
+        }
+      }
+
+      // Update state
+      player.state = newState;
+
+      // Update animation
+      player.animTimer += dt;
+      const frameTime = 1 / ANIMATION_FPS;
+      if (player.animTimer >= frameTime) {
+        player.animTimer -= frameTime;
+        player.animFrame++;
+      }
+
+      // Collect gold
+      checkGoldCollection();
+    }
+
+    function checkGoldCollection() {
+      const player = gameState.player;
+      const tileSize = gameState.tileSize;
+
+      // Check center of player
+      const tileX = Math.floor((player.x + tileSize / 2) / tileSize);
+      const tileY = Math.floor((player.y + tileSize / 2) / tileSize);
+
+      if (tileX >= 0 && tileX < LEVEL_WIDTH && tileY >= 0 && tileY < LEVEL_HEIGHT) {
+        if (gameState.level[tileY][tileX] === TILES.GOLD) {
+          gameState.level[tileY][tileX] = TILES.EMPTY;
+          gameState.goldCollected++;
+        }
+      }
+    }
+
+    function digBrick(direction) {
+      const player = gameState.player;
+      const tileSize = gameState.tileSize;
+
+      // Get player's tile position
+      const tileX = Math.floor((player.x + tileSize / 2) / tileSize);
+      const tileY = Math.floor((player.y + tileSize / 2) / tileSize);
+
+      const digX = tileX + direction;
+      const digY = tileY + 1; // Dig below and to the side
+
+      // Check bounds
+      if (digX < 0 || digX >= LEVEL_WIDTH || digY < 0 || digY >= LEVEL_HEIGHT) return;
+
+      // Can only dig bricks (not solid blocks)
+      if (getTile(digX, digY) !== TILES.BRICK) return;
+
+      // Add to dug bricks with respawn timer (5 seconds)
+      gameState.dugBricks.push({
+        x: digX,
+        y: digY,
+        timer: 5000,
+        originalTile: TILES.BRICK
+      });
+
+      // Update facing direction
+      player.facingRight = direction > 0;
+    }
+
+    // === ENEMY AI ===
+
+    function initEnemy(tileX, tileY) {
+      const tileSize = gameState.tileSize;
+      return {
+        x: tileX * tileSize,
+        y: tileY * tileSize,
+        vx: 0,
+        vy: 0,
+        facingRight: Math.random() > 0.5,
+        state: 'idle', // idle, running, climbing, rope, falling
+        animFrame: 0,
+        animTimer: 0,
+        thinkTimer: Math.random() * ENEMY_THINK_INTERVAL, // Stagger AI updates
+        targetDir: 0, // -1 left, 0 none, 1 right
+        targetVertical: 0, // -1 up, 0 none, 1 down
+        // Anti-oscillation tracking
+        positionHistory: [], // Recent tile positions
+        lastMoveDir: 0, // Last horizontal direction chosen
+        lastVerticalDir: 0, // Last vertical direction chosen
+      };
+    }
+
+    // === AUTHENTIC LODE RUNNER GUARD AI ===
+    // Based on original game behavior analysis:
+    // - Two-goal hierarchy: direct chase if possible, otherwise seek better vertical position
+    // - Scoring: same level = best, above player = good, below player = worst
+    // - Guards ignore dug pits (walk right into them)
+
+    function updateEnemyAI(enemy) {
+      const tileSize = gameState.tileSize;
+      const player = gameState.player;
+
+      // Get tile positions
+      const enemyTileX = Math.floor((enemy.x + tileSize / 2) / tileSize);
+      const enemyTileY = Math.floor((enemy.y + tileSize / 2) / tileSize);
+      const enemyFeetTileY = Math.floor((enemy.y + tileSize - 1) / tileSize);
+      const playerTileX = Math.floor((player.x + tileSize / 2) / tileSize);
+      const playerTileY = Math.floor((player.y + tileSize / 2) / tileSize);
+
+      const dx = playerTileX - enemyTileX;
+      const dy = playerTileY - enemyTileY;
+
+      // Get tile info
+      const currentTile = getTile(enemyTileX, enemyTileY);
+      const tileAtFeet = getTile(enemyTileX, enemyFeetTileY);
+      const tileBelow = getTile(enemyTileX, enemyTileY + 1);
+
+      const onLadder = currentTile === TILES.LADDER || tileAtFeet === TILES.LADDER;
+      const onRope = currentTile === TILES.ROPE || tileAtFeet === TILES.ROPE;
+      const feetOnLadder = tileAtFeet === TILES.LADDER;
+
+      enemy.targetDir = 0;
+      enemy.targetVertical = 0;
+
+      // Helper: can move to tile (ignores dug pits like original!)
+      const canMoveTo = (x, y) => {
+        const tile = getTile(x, y);
+        return tile === TILES.EMPTY || tile === TILES.LADDER || tile === TILES.ROPE ||
+               tile === TILES.GOLD || tile === TILES.SPAWN || tile === TILES.ENEMY;
+      };
+
+      // Helper: has ground to stand on (includes trapped enemies as ground)
+      const hasGround = (x, y) => {
+        const below = getTile(x, y + 1);
+        return isSolidTile(below) || below === TILES.LADDER || hasTrappedEnemyAt(x, y + 1, enemy);
+      };
+
+      // Helper: score a vertical level relative to player
+      const scoreLevelY = (y) => {
+        if (y === playerTileY) return 100;  // Same level = best
+        if (y < playerTileY) return 50;     // Above player = decent
+        return 10;                           // Below player = worst
+      };
+
+      // Helper: score horizontal distance (closer = better, breaks ties)
+      const scoreDistanceX = (endX) => 100 - Math.abs(endX - playerTileX);
+
+      // Helper: trace a fall from position
+      const traceFall = (x, y) => {
+        let fallY = y;
+        while (fallY < LEVEL_HEIGHT - 1 && canMoveTo(x, fallY + 1) && getTile(x, fallY) !== TILES.ROPE) {
+          fallY++;
+        }
+        return fallY;
+      };
+
+      // Helper: scan in a direction to find what level we'd reach
+      const scanPath = (startX, startY, dirX, dirY, maxSteps = 15) => {
+        let x = startX;
+        let y = startY;
+
+        for (let i = 0; i < maxSteps; i++) {
+          const nextX = x + dirX;
+          const nextY = y + dirY;
+
+          if (dirY !== 0) {
+            // Vertical movement on ladder
+            const tile = getTile(x, y);
+            if (dirY < 0 && tile !== TILES.LADDER) {
+              return { x, y, steps: i, blocked: true };
+            }
+            if (!canMoveTo(nextX, nextY) && getTile(nextX, nextY) !== TILES.LADDER) {
+              return { x, y, steps: i, blocked: true };
+            }
+            y = nextY;
+          } else {
+            // Horizontal movement
+            if (!canMoveTo(nextX, nextY)) {
+              return { x, y, steps: i, blocked: true };
+            }
+            if (!hasGround(nextX, y) && getTile(nextX, y) !== TILES.ROPE) {
+              // Would fall - trace it
+              return { x: nextX, y: traceFall(nextX, y), steps: i + 1, fell: true };
+            }
+            x = nextX;
+          }
+        }
+        return { x, y, steps: maxSteps, blocked: false };
+      };
+
+      // === GOAL 1: Direct horizontal chase if on same level ===
+      if (dy === 0 && dx !== 0) {
+        const moveDir = dx > 0 ? 1 : -1;
+        if (canMoveTo(enemyTileX + moveDir, enemyTileY)) {
+          enemy.targetDir = moveDir;
+          return;
+        }
+      }
+
+      // === GOAL 2: Seek better vertical positioning ===
+      const moves = [];
+
+      // DOWN - climb down ladder
+      if (tileBelow === TILES.LADDER) {
+        const result = scanPath(enemyTileX, enemyTileY, 0, 1);
+        moves.push({
+          dir: 'down', targetDir: 0, targetVertical: 1,
+          scoreY: scoreLevelY(result.y), scoreX: scoreDistanceX(result.x), steps: result.steps
+        });
+      }
+
+      // UP - climb up ladder
+      if (onLadder && feetOnLadder && canMoveTo(enemyTileX, enemyTileY - 1)) {
+        const result = scanPath(enemyTileX, enemyTileY, 0, -1);
+        moves.push({
+          dir: 'up', targetDir: 0, targetVertical: -1,
+          scoreY: scoreLevelY(result.y), scoreX: scoreDistanceX(result.x), steps: result.steps
+        });
+      }
+
+      // LEFT - check if can exit ladder without falling into void
+      const leftPassable = canMoveTo(enemyTileX - 1, enemyTileY);
+      const leftWouldFall = leftPassable && !hasGround(enemyTileX - 1, enemyTileY) && getTile(enemyTileX - 1, enemyTileY) !== TILES.ROPE;
+      const canExitLeft = !onLadder || !leftWouldFall || !feetOnLadder;
+      if (leftPassable && canExitLeft) {
+        const result = scanPath(enemyTileX, enemyTileY, -1, 0);
+        moves.push({
+          dir: 'left', targetDir: -1, targetVertical: 0,
+          scoreY: scoreLevelY(result.y), scoreX: scoreDistanceX(result.x), steps: result.steps
+        });
+      }
+
+      // RIGHT
+      const rightPassable = canMoveTo(enemyTileX + 1, enemyTileY);
+      const rightWouldFall = rightPassable && !hasGround(enemyTileX + 1, enemyTileY) && getTile(enemyTileX + 1, enemyTileY) !== TILES.ROPE;
+      const canExitRight = !onLadder || !rightWouldFall || !feetOnLadder;
+      if (rightPassable && canExitRight) {
+        const result = scanPath(enemyTileX, enemyTileY, 1, 0);
+        moves.push({
+          dir: 'right', targetDir: 1, targetVertical: 0,
+          scoreY: scoreLevelY(result.y), scoreX: scoreDistanceX(result.x), steps: result.steps
+        });
+      }
+
+      // DROP from rope
+      if (onRope && canMoveTo(enemyTileX, enemyTileY + 1)) {
+        const fallY = traceFall(enemyTileX, enemyTileY);
+        moves.push({
+          dir: 'drop', targetDir: 0, targetVertical: 1,
+          scoreY: scoreLevelY(fallY), scoreX: scoreDistanceX(enemyTileX), steps: fallY - enemyTileY
+        });
+      }
+
+      if (moves.length === 0) return; // Stuck
+
+      // Sort: Y level (primary), X distance (secondary), steps (tertiary)
+      moves.sort((a, b) => {
+        if (b.scoreY !== a.scoreY) return b.scoreY - a.scoreY;
+        if (b.scoreX !== a.scoreX) return b.scoreX - a.scoreX;
+        return a.steps - b.steps;
+      });
+
+      const bestMove = moves[0];
+
+      // === ANTI-OSCILLATION ===
+      const currentPos = `${enemyTileX},${enemyTileY}`;
+      if (!enemy.positionHistory) enemy.positionHistory = [];
+      enemy.positionHistory.push(currentPos);
+      if (enemy.positionHistory.length > 6) enemy.positionHistory.shift();
+
+      // Detect A-B-A-B or A-B-C-B-A patterns
+      let isOscillating = false;
+      if (enemy.positionHistory.length >= 4) {
+        const r = enemy.positionHistory.slice(-4);
+        if (r[0] === r[2] && r[1] === r[3] && r[0] !== r[1]) isOscillating = true;
+      }
+      if (enemy.positionHistory.length >= 5) {
+        const r = enemy.positionHistory.slice(-5);
+        if (r[0] === r[4] && r[1] === r[3]) isOscillating = true;
+      }
+
+      if (isOscillating) {
+        // Break pattern: prefer direction toward player
+        if (dx !== 0) {
+          const toward = moves.find(m => m.targetDir === (dx > 0 ? 1 : -1));
+          if (toward) {
+            enemy.targetDir = toward.targetDir;
+            enemy.targetVertical = toward.targetVertical;
+            enemy.lastMoveDir = toward.targetDir;
+            enemy.lastVerticalDir = toward.targetVertical;
+            enemy.positionHistory = [currentPos];
+            return;
+          }
+        }
+        // Continue last direction
+        if (enemy.lastMoveDir !== 0) {
+          const cont = moves.find(m => m.targetDir === enemy.lastMoveDir);
+          if (cont) {
+            enemy.targetDir = cont.targetDir;
+            enemy.targetVertical = cont.targetVertical;
+            return;
+          }
+        }
+        // Pick different move
+        const diff = moves.find(m => m.targetDir !== -enemy.lastMoveDir || m.targetVertical !== -enemy.lastVerticalDir);
+        if (diff) {
+          enemy.targetDir = diff.targetDir;
+          enemy.targetVertical = diff.targetVertical;
+          enemy.lastMoveDir = diff.targetDir;
+          enemy.lastVerticalDir = diff.targetVertical;
+          return;
+        }
+      }
+
+      // 8% random imperfection
+      if (moves.length > 1 && Math.random() < 0.08) {
+        const alt = moves[Math.floor(Math.random() * Math.min(moves.length, 3))];
+        enemy.targetDir = alt.targetDir;
+        enemy.targetVertical = alt.targetVertical;
+      } else {
+        enemy.targetDir = bestMove.targetDir;
+        enemy.targetVertical = bestMove.targetVertical;
+      }
+
+      enemy.lastMoveDir = enemy.targetDir;
+      enemy.lastVerticalDir = enemy.targetVertical;
+    }
+
+    function isInDugHole(x, y, tileSize) {
+      const tileX = Math.floor((x + tileSize / 2) / tileSize);
+      const tileY = Math.floor((y + tileSize / 2) / tileSize);
+      return gameState.dugBricks.some(b => b.x === tileX && b.y === tileY);
+    }
+
+    function updateEnemy(enemy, dt) {
+      const tileSize = gameState.tileSize;
+
+      // Check if enemy is trapped in a dug hole
+      if (enemy.trapped) {
+        const tileX = Math.floor((enemy.x + tileSize / 2) / tileSize);
+        const tileY = Math.floor((enemy.y + tileSize / 2) / tileSize);
+        const dugBrick = gameState.dugBricks.find(b => b.x === tileX && b.y === tileY);
+
+        if (!dugBrick) {
+          // Hole filled in - just release them (shouldn't happen normally)
+          enemy.trapped = false;
+          return;
+        }
+
+        // Check how long until brick regenerates - enemy escapes near the end
+        const timeRemaining = dugBrick.timer;
+        const ESCAPE_TIME = 1.0; // Escape 1 second before brick regenerates
+
+        if (timeRemaining <= ESCAPE_TIME) {
+          // Enemy escapes! Respawn just above ground level where they fell in
+          // Use their trapped tile X, but place them on the surface (tileY - 1)
+          enemy.x = tileX * tileSize;
+          enemy.y = (tileY - 1) * tileSize;
+          enemy.trapped = false;
+          enemy.vx = 0;
+          enemy.vy = 0;
+          enemy.state = 'idle';
+          enemy.positionHistory = [];
+          return;
+        }
+
+        // While trapped, don't move but animate
+        enemy.state = 'trapped';
+        enemy.animTimer += dt;
+        const frameTime = 1 / ANIMATION_FPS;
+        if (enemy.animTimer >= frameTime) {
+          enemy.animTimer -= frameTime;
+          enemy.animFrame++;
+        }
+        return; // Skip normal movement
+      }
+
+      // Update AI think timer
+      enemy.thinkTimer -= dt;
+      if (enemy.thinkTimer <= 0) {
+        enemy.thinkTimer = ENEMY_THINK_INTERVAL;
+        updateEnemyAI(enemy);
+      }
+
+      // Get current tile position
+      const centerX = enemy.x + tileSize / 2;
+      const centerY = enemy.y + tileSize / 2;
+      const tileX = Math.floor(centerX / tileSize);
+      const tileY = Math.floor(centerY / tileSize);
+      const currentTile = getTile(tileX, tileY);
+
+      // Check tile at feet
+      const feetY = enemy.y + tileSize - 1;
+      const feetTileY = Math.floor(feetY / tileSize);
+      const tileAtFeet = getTile(tileX, feetTileY);
+
+      // Check tile below
+      const belowY = enemy.y + tileSize;
+      const belowTileY = Math.floor(belowY / tileSize);
+      const tileBelow = getTile(tileX, belowTileY);
+
+      // Check if standing in a dug hole
+      const inDugHole = gameState.dugBricks.some(b => b.x === tileX && b.y === tileY);
+      if (inDugHole) {
+        // Snap to hole and become trapped
+        enemy.x = tileX * tileSize;
+        enemy.y = tileY * tileSize;
+        enemy.trapped = true;
+        enemy.vx = 0;
+        enemy.vy = 0;
+        enemy.state = 'trapped';
+        return;
+      }
+
+      const onLadder = currentTile === TILES.LADDER || tileAtFeet === TILES.LADDER;
+      const onRope = currentTile === TILES.ROPE || tileAtFeet === TILES.ROPE;
+      // Check for ground including trapped enemies (but not counting self)
+      const onGround = isSolidTile(tileBelow) || belowTileY >= LEVEL_HEIGHT || hasTrappedEnemyAt(tileX, belowTileY, enemy);
+      const onLadderTop = tileBelow === TILES.LADDER;
+
+      // Calculate velocity based on AI decisions
+      let newVx = 0;
+      let newVy = enemy.vy;
+      let newState = 'idle';
+
+      // Horizontal movement
+      if (enemy.targetDir !== 0) {
+        newVx = enemy.targetDir * ENEMY_SPEED;
+        enemy.facingRight = enemy.targetDir > 0;
+      }
+
+      // Vertical movement
+      if (onLadder) {
+        newVy = 0;
+        if (enemy.targetVertical < 0) {
+          newVy = -ENEMY_SPEED;
+          newState = 'climbing';
+        } else if (enemy.targetVertical > 0) {
+          newVy = ENEMY_SPEED;
+          newState = 'climbing';
+        } else if (newVx !== 0) {
+          newState = 'running';
+        } else {
+          newState = 'climbing';
+        }
+      } else if (onRope) {
+        newVy = 0;
+        if (enemy.targetVertical > 0) {
+          newVy = ENEMY_SPEED * 0.5;
+        }
+        newState = 'rope';
+      } else {
+        // Can climb down into ladder
+        if (enemy.targetVertical > 0 && tileBelow === TILES.LADDER) {
+          newVy = ENEMY_SPEED;
+          newState = 'climbing';
+        }
+        // Apply gravity if not on ground
+        else if (!onGround && !onLadderTop) {
+          newVy += GRAVITY * dt;
+          newVy = Math.min(newVy, MAX_FALL_SPEED);
+          newState = 'falling';
+        } else {
+          newVy = 0;
+          if (newVx !== 0) {
+            newState = 'running';
+          }
+        }
+      }
+
+      enemy.vx = newVx;
+      enemy.vy = newVy;
+
+      // Move horizontally
+      if (enemy.vx !== 0) {
+        const newX = enemy.x + enemy.vx * dt;
+        // Use a larger margin on top to allow fitting through 1-tile gaps at ladder tops
+        // This helps enemies exit ladders even when there's a ceiling nearby
+        const COLLISION_MARGIN_TOP = tileSize * 0.35; // 35% of tile size from top
+        // Use a margin on bottom to avoid checking the tile row we're standing on
+        // This prevents getting stuck when standing on bricks next to ladders
+        const COLLISION_MARGIN_BOTTOM = tileSize * 0.1; // 10% margin from bottom
+        const testX = enemy.vx > 0 ? newX + tileSize - 1 : newX;
+        const testTileX = Math.floor(testX / tileSize);
+
+        const topTile = getTile(testTileX, Math.floor((enemy.y + COLLISION_MARGIN_TOP) / tileSize));
+        const bottomTile = getTile(testTileX, Math.floor((enemy.y + tileSize - 1 - COLLISION_MARGIN_BOTTOM) / tileSize));
+
+        if (isPassableTile(topTile) && isPassableTile(bottomTile) &&
+            newX >= 0 && newX + tileSize <= LEVEL_WIDTH * tileSize) {
+          enemy.x = newX;
+        }
+      }
+
+      // Move vertically
+      if (enemy.vy !== 0) {
+        const newY = enemy.y + enemy.vy * dt;
+
+        if (enemy.vy > 0) {
+          // Moving down
+          const testTileY = Math.floor((newY + tileSize) / tileSize);
+          const centerTileX = Math.floor((enemy.x + tileSize / 2) / tileSize);
+          const tileAtNewFeet = getTile(centerTileX, testTileY);
+
+          // Check for rope at center position (where hands would grab)
+          const centerY = newY + tileSize / 2;
+          const centerTileY = Math.floor(centerY / tileSize);
+          const tileAtCenter = getTile(centerTileX, centerTileY);
+
+          // Check if there's a trapped enemy below (acts as ground)
+          const trappedEnemyBelow = hasTrappedEnemyAt(centerTileX, testTileY, enemy);
+
+          if (newY + tileSize <= LEVEL_HEIGHT * tileSize) {
+            // Check if we're falling through a rope - grab it!
+            if (tileAtCenter === TILES.ROPE && enemy.state === 'falling') {
+              // Snap to rope - center enemy on the rope tile
+              enemy.y = centerTileY * tileSize;
+              enemy.vy = 0;
+              enemy.state = 'rope';
+            }
+            // Land on trapped enemy
+            else if (trappedEnemyBelow) {
+              enemy.y = testTileY * tileSize - tileSize;
+              enemy.vy = 0;
+            }
+            else if (isPassableTile(tileAtNewFeet) || tileAtNewFeet === TILES.LADDER) {
+              enemy.y = newY;
+            } else {
+              enemy.y = testTileY * tileSize - tileSize;
+              enemy.vy = 0;
+            }
+          }
+        } else {
+          // Moving up
+          const centerTileX = Math.floor((enemy.x + tileSize / 2) / tileSize);
+          const newFeetY = newY + tileSize - 1;
+          const newFeetTileY = Math.floor(newFeetY / tileSize);
+          const tileAtNewFeet = getTile(centerTileX, newFeetTileY);
+          const testTileY = Math.floor(newY / tileSize);
+          const tileAtHead = getTile(centerTileX, testTileY);
+
+          const feetOnLadder = tileAtNewFeet === TILES.LADDER;
+          const headClear = isPassableTile(tileAtHead);
+
+          if ((headClear || feetOnLadder) && newY >= 0) {
+            enemy.y = newY;
+          }
+        }
+      }
+
+      // Update state and animation
+      enemy.state = newState;
+      enemy.animTimer += dt;
+      const frameTime = 1 / ANIMATION_FPS;
+      if (enemy.animTimer >= frameTime) {
+        enemy.animTimer -= frameTime;
+        enemy.animFrame++;
+      }
+    }
+
+    function updateEnemies(dt) {
+      for (const enemy of gameState.enemies) {
+        updateEnemy(enemy, dt);
+      }
+    }
+
+    function getEnemySprite(enemy) {
+      let anim;
+
+      switch (enemy.state) {
+        case 'trapped':
+          // Use climb animation for trapped (looks like struggling)
+          anim = sprites.enemy.climb;
+          break;
+        case 'climbing':
+          anim = sprites.enemy.climb;
+          break;
+        case 'rope':
+          anim = sprites.enemy.rope;
+          break;
+        case 'running':
+          anim = enemy.facingRight ? sprites.enemy.runRight : sprites.enemy.runLeft;
+          break;
+        case 'falling':
+        case 'idle':
+        default:
+          anim = enemy.facingRight ? sprites.enemy.runRight : sprites.enemy.runLeft;
+          if (enemy.state === 'idle' || enemy.state === 'falling') {
+            return anim && anim[0];
+          }
+          break;
+      }
+
+      if (!anim || anim.length === 0) return null;
+      const frame = enemy.animFrame % anim.length;
+      return anim[frame];
+    }
+
+    function checkEnemyCollision() {
+      const player = gameState.player;
+      const tileSize = gameState.tileSize;
+      const collisionDist = tileSize * 0.6; // Collision distance
+
+      for (const enemy of gameState.enemies) {
+        // Trapped enemies can't catch the player
+        if (enemy.trapped) continue;
+
+        const dx = (player.x + tileSize / 2) - (enemy.x + tileSize / 2);
+        const dy = (player.y + tileSize / 2) - (enemy.y + tileSize / 2);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < collisionDist) {
+          // Player caught by enemy - lose a life
+          killPlayer();
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // === RENDERING ===
+
+    function tintSprite(sprite, color, tileSize) {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = tileSize;
+      tempCanvas.height = tileSize;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      tempCtx.imageSmoothingEnabled = false;
+      tempCtx.drawImage(sprite, 0, 0, tileSize, tileSize);
+      tempCtx.globalCompositeOperation = 'source-in';
+      tempCtx.fillStyle = color;
+      tempCtx.fillRect(0, 0, tileSize, tileSize);
+
+      return tempCanvas;
+    }
+
+    const tintedSpriteCache = new Map();
+
+    function getTintedSprite(tile, tileSize) {
+      const cacheKey = `${tile}-${tileSize}`;
+      if (tintedSpriteCache.has(cacheKey)) {
+        return tintedSpriteCache.get(cacheKey);
+      }
+
+      const sprite = sprites.tiles[tile];
+      const color = COLOR_MAP[tile];
+
+      if (sprite && color && IS_ONE_BIT) {
+        const tinted = tintSprite(sprite, color, tileSize);
+        tintedSpriteCache.set(cacheKey, tinted);
+        return tinted;
+      }
+
+      return sprite;
+    }
+
+    function drawEntity(ctx, sprite, px, py, tileSize) {
+      if (!sprite) return;
+      const aspectRatio = sprite.naturalWidth / sprite.naturalHeight;
+      const drawHeight = tileSize;
+      const drawWidth = tileSize * aspectRatio;
+      const drawX = px + (tileSize - drawWidth) / 2;
+      const drawY = py;
+      ctx.drawImage(sprite, drawX, drawY, drawWidth, drawHeight);
+    }
+
+    function getPlayerSprite() {
+      const player = gameState.player;
+      let anim;
+
+      switch (player.state) {
+        case 'climbing':
+          anim = sprites.player.climb;
+          break;
+        case 'rope':
+          anim = sprites.player.rope;
+          break;
+        case 'running':
+          anim = player.facingRight ? sprites.player.runRight : sprites.player.runLeft;
+          break;
+        case 'falling':
+        case 'idle':
+        default:
+          // Use first frame of run animation for idle/falling
+          anim = player.facingRight ? sprites.player.runRight : sprites.player.runLeft;
+          if (player.state === 'idle' || player.state === 'falling') {
+            return anim[0]; // Return first frame only
+          }
+          break;
+      }
+
+      if (!anim || anim.length === 0) return null;
+      const frame = player.animFrame % anim.length;
+      return anim[frame];
+    }
+
+    function renderLevel(canvas, tileSize) {
+      const ctx = canvas.getContext('2d');
+      const level = gameState.baseLevel;
+      const width = level[0].length;
+      const height = level.length;
+
+      canvas.width = width * tileSize;
+      canvas.height = height * tileSize;
+
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingEnabled = false;
+
+      // Render base level tiles
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let tile = level[y][x];
+          const px = x * tileSize;
+          const py = y * tileSize;
+
+          // Check if this brick is dug
+          const isDug = gameState.dugBricks.some(b => b.x === x && b.y === y);
+          if (isDug && tile === TILES.BRICK) {
+            continue;
+          }
+
+          if (tile === TILES.EMPTY || tile === TILES.SPAWN || tile === TILES.ENEMY) continue;
+
+          // Gold - check if collected
+          if (tile === TILES.GOLD) {
+            const collected = !gameState.level[y][x] || gameState.level[y][x] !== TILES.GOLD;
+            if (collected) continue;
+            ctx.fillStyle = COLOR_MAP[tile];
+            ctx.fillRect(px + tileSize * 0.2, py + tileSize * 0.2, tileSize * 0.6, tileSize * 0.6);
+            continue;
+          }
+
+          if (USE_COLOR_ONLY.has(tile)) {
+            ctx.fillStyle = COLOR_MAP[tile] || '#ff00ff';
+            ctx.fillRect(px, py, tileSize, tileSize);
+            continue;
+          }
+
+          const sprite = sprites.tiles[tile];
+          if (sprite) {
+            if (IS_ONE_BIT) {
+              const tinted = getTintedSprite(tile, tileSize);
+              ctx.drawImage(tinted, px, py);
+            } else {
+              ctx.drawImage(sprite, px, py, tileSize, tileSize);
+            }
+          } else {
+            ctx.fillStyle = COLOR_MAP[tile] || '#ff00ff';
+            ctx.fillRect(px, py, tileSize, tileSize);
+          }
+        }
+      }
+
+      // Render enemies
+      for (const enemy of gameState.enemies) {
+        const enemySprite = getEnemySprite(enemy);
+        if (enemySprite) {
+          drawEntity(ctx, enemySprite, enemy.x, enemy.y, tileSize);
+        }
+      }
+
+      // Render player
+      const player = gameState.player;
+      const playerSprite = getPlayerSprite();
+      if (playerSprite) {
+        drawEntity(ctx, playerSprite, player.x, player.y, tileSize);
+      }
+
+      // Debug: Draw collision boxes
+      if (DEBUG_SHOW_COLLISION) {
+        const collisionDist = tileSize * 0.6; // Same as in checkEnemyCollision
+
+        // Player collision box (blue outline)
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(player.x, player.y, tileSize, tileSize);
+
+        // Player center point
+        ctx.fillStyle = '#00ffff';
+        ctx.beginPath();
+        ctx.arc(player.x + tileSize / 2, player.y + tileSize / 2, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Player collision radius (circle)
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(player.x + tileSize / 2, player.y + tileSize / 2, collisionDist / 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Enemy collision boxes (red outline)
+        for (const enemy of gameState.enemies) {
+          if (enemy.trapped) {
+            ctx.strokeStyle = '#ffff00'; // Yellow for trapped
+          } else {
+            ctx.strokeStyle = '#ff4466'; // Red for active
+          }
+          ctx.lineWidth = 2;
+          ctx.strokeRect(enemy.x, enemy.y, tileSize, tileSize);
+
+          // Enemy center point
+          ctx.fillStyle = enemy.trapped ? '#ffff00' : '#ff4466';
+          ctx.beginPath();
+          ctx.arc(enemy.x + tileSize / 2, enemy.y + tileSize / 2, 3, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Enemy collision radius
+          ctx.strokeStyle = enemy.trapped ? 'rgba(255, 255, 0, 0.5)' : 'rgba(255, 68, 102, 0.5)';
+          ctx.beginPath();
+          ctx.arc(enemy.x + tileSize / 2, enemy.y + tileSize / 2, collisionDist / 2, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Draw line to show collision distance
+          const dx = (player.x + tileSize / 2) - (enemy.x + tileSize / 2);
+          const dy = (player.y + tileSize / 2) - (enemy.y + tileSize / 2);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Line from enemy to player (green if safe, red if in collision range)
+          ctx.strokeStyle = dist < collisionDist ? '#ff0000' : '#00ff00';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(enemy.x + tileSize / 2, enemy.y + tileSize / 2);
+          ctx.lineTo(player.x + tileSize / 2, player.y + tileSize / 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Distance text
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '10px monospace';
+          ctx.fillText(
+            `${Math.round(dist)}px`,
+            (enemy.x + player.x + tileSize) / 2,
+            (enemy.y + player.y + tileSize) / 2
+          );
+        }
+
+        // Debug info in corner
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(5, 5, 200, 60);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px monospace';
+        ctx.fillText(`Player: (${Math.round(player.x)}, ${Math.round(player.y)})`, 10, 20);
+        ctx.fillText(`Collision dist: ${collisionDist.toFixed(1)}px`, 10, 35);
+        ctx.fillText(`Press D to toggle debug`, 10, 50);
+      }
+
+      // Update game status
+      updateGameStatus();
+    }
+
+    function updateGameStatus() {
+      const statusEl = document.getElementById('game-status');
+      statusEl.textContent = `Lives: ${gameState.lives} | Gold: ${gameState.goldCollected}/${gameState.totalGold}`;
+      if (gameState.goldCollected >= gameState.totalGold && gameState.totalGold > 0) {
+        statusEl.textContent += ' - YOU WIN!';
+        statusEl.className = 'win';
+      } else {
+        statusEl.className = '';
+      }
+    }
+
+    function levelToAsciiHtml(level) {
+      const classMap = {
+        '.': 'tile-empty',
+        'b': 'tile-brick',
+        'B': 'tile-solid',
+        '#': 'tile-ladder',
+        '-': 'tile-rope',
+        'G': 'tile-gold',
+        'E': 'tile-enemy',
+        'M': 'tile-spawn',
+      };
+
+      return level.map(row =>
+        row.map(tile => `<span class="${classMap[tile] || ''}">${tile}</span>`).join('')
+      ).join('\n');
+    }
+
+    function updateSpritePreview(tileSize) {
+      const container = document.getElementById('sprite-preview');
+      container.innerHTML = '';
+
+      const tiles = [
+        { tile: TILES.BRICK, name: 'Brick (b)' },
+        { tile: TILES.SOLID, name: 'Solid (B)' },
+        { tile: TILES.LADDER, name: 'Ladder (#)' },
+        { tile: TILES.ROPE, name: 'Rope (-)' },
+        { tile: TILES.GOLD, name: 'Gold (G)' },
+        { tile: TILES.ENEMY, name: 'Enemy (E)' },
+        { tile: TILES.SPAWN, name: 'Player (M)' },
+      ];
+
+      for (const { tile, name } of tiles) {
+        const div = document.createElement('div');
+        div.className = 'sprite-item';
+
+        const previewCanvas = document.createElement('canvas');
+        previewCanvas.width = tileSize;
+        previewCanvas.height = tileSize;
+        previewCanvas.style.background = '#333';
+        previewCanvas.style.imageRendering = 'pixelated';
+
+        const ctx = previewCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        if (USE_COLOR_ONLY.has(tile)) {
+          ctx.fillStyle = COLOR_MAP[tile] || '#ff00ff';
+          ctx.fillRect(0, 0, tileSize, tileSize);
+        } else if (tile === TILES.SPAWN) {
+          const sprite = sprites.player.runRight && sprites.player.runRight[0];
+          if (sprite) {
+            const aspectRatio = sprite.naturalWidth / sprite.naturalHeight;
+            const drawHeight = tileSize;
+            const drawWidth = tileSize * aspectRatio;
+            const drawX = (tileSize - drawWidth) / 2;
+            ctx.drawImage(sprite, drawX, 0, drawWidth, drawHeight);
+          }
+        } else if (tile === TILES.ENEMY) {
+          const sprite = sprites.enemy.runRight && sprites.enemy.runRight[0];
+          if (sprite) {
+            const aspectRatio = sprite.naturalWidth / sprite.naturalHeight;
+            const drawHeight = tileSize;
+            const drawWidth = tileSize * aspectRatio;
+            const drawX = (tileSize - drawWidth) / 2;
+            ctx.drawImage(sprite, drawX, 0, drawWidth, drawHeight);
+          }
+        } else {
+          const sprite = sprites.tiles[tile];
+          if (sprite) {
+            if (IS_ONE_BIT) {
+              const tinted = tintSprite(sprite, COLOR_MAP[tile], tileSize);
+              ctx.drawImage(tinted, 0, 0);
+            } else {
+              ctx.drawImage(sprite, 0, 0, tileSize, tileSize);
+            }
+          } else {
+            ctx.fillStyle = COLOR_MAP[tile] || '#ff00ff';
+            ctx.fillRect(0, 0, tileSize, tileSize);
+          }
+        }
+
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = name;
+
+        const colorInfo = document.createElement('div');
+        colorInfo.className = 'size';
+        colorInfo.textContent = COLOR_MAP[tile];
+        colorInfo.style.color = COLOR_MAP[tile];
+
+        div.appendChild(previewCanvas);
+        div.appendChild(label);
+        div.appendChild(colorInfo);
+        container.appendChild(div);
+      }
+    }
+
+    // === INPUT HANDLING ===
+
+    function handleKeyDown(e) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'z', 'x', 'Z', 'X'].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      switch (e.key) {
+        case 'ArrowLeft':
+          input.left = true;
+          break;
+        case 'ArrowRight':
+          input.right = true;
+          break;
+        case 'ArrowUp':
+          input.up = true;
+          break;
+        case 'ArrowDown':
+          input.down = true;
+          break;
+        case 'z':
+        case 'Z':
+          digBrick(-1);
+          break;
+        case 'x':
+        case 'X':
+          digBrick(1);
+          break;
+        case 'd':
+        case 'D':
+          DEBUG_SHOW_COLLISION = !DEBUG_SHOW_COLLISION;
+          break;
+      }
+    }
+
+    function handleKeyUp(e) {
+      switch (e.key) {
+        case 'ArrowLeft':
+          input.left = false;
+          break;
+        case 'ArrowRight':
+          input.right = false;
+          break;
+        case 'ArrowUp':
+          input.up = false;
+          break;
+        case 'ArrowDown':
+          input.down = false;
+          break;
+      }
+    }
+
+    // === GAME LOOP ===
+    let lastTime = 0;
+
+    function gameLoop(currentTime) {
+      const dt = Math.min((currentTime - lastTime) / 1000, 0.1); // Cap delta time
+      lastTime = currentTime;
+
+      // Update game state
+      if (gameState.isPlaying) {
+        updatePlayer(dt);
+        updateEnemies(dt);
+        checkEnemyCollision();
+
+        // Update dug brick timers
+        for (let i = gameState.dugBricks.length - 1; i >= 0; i--) {
+          gameState.dugBricks[i].timer -= dt * 1000;
+          if (gameState.dugBricks[i].timer <= 0) {
+            gameState.dugBricks.splice(i, 1);
+          }
+        }
+      }
+
+      // Render - use the tile size from game state (set by generateAndRender or resize handler)
+      // DO NOT read from DOM - it has a stale hardcoded value
+      const tileSize = gameState.tileSize;
+      tintedSpriteCache.clear();
+      const canvas = document.getElementById('level-canvas');
+      renderLevel(canvas, tileSize);
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // === MAIN ===
+    const markovGen = new SimpleMarkovGenerator();
+    // Use pre-trained model (trained on 592 levels)
+    markovGen.loadPreTrainedModel(PRE_TRAINED_MODEL);
+
+    // Parse a level string into a 2D array
+    function parseLevel(levelStr) {
+      return levelStr.trim().split('\n').map(row => row.split(''));
+    }
+
+    // Load and render an original level by index
+    function loadOriginalLevel(index) {
+      if (index < 0 || index >= ORIGINAL_LEVELS.length) return;
+
+      currentLevelIndex = index;
+      document.getElementById('level-number').textContent = `Level ${index + 1} / ${ORIGINAL_LEVELS.length}`;
+
+      const tileSize = calculateTileSize();
+      const level = parseLevel(ORIGINAL_LEVELS[index]);
+
+      // Find entities from the level
+      const goldPositions = [];
+      const enemies = [];
+      let spawn = null;
+
+      for (let y = 0; y < level.length; y++) {
+        for (let x = 0; x < level[y].length; x++) {
+          const tile = level[y][x];
+          if (tile === 'G') {
+            goldPositions.push({ x, y });
+          } else if (tile === 'E') {
+            enemies.push({ x, y });
+          } else if (tile === 'M') {
+            spawn = { x, y };
+          }
+        }
+      }
+
+      // Deep copy level for game state
+      const levelCopy = level.map(row => [...row]);
+      const baseLevel = level.map(row => [...row]);
+
+      // Initialize enemies
+      const initializedEnemies = enemies.map(e => ({
+        x: e.x * tileSize,
+        y: e.y * tileSize,
+        vx: 0,
+        vy: 0,
+        facingRight: Math.random() > 0.5,
+        state: 'idle',
+        animFrame: 0,
+        animTimer: 0,
+        thinkTimer: Math.random() * ENEMY_THINK_INTERVAL,
+        targetDir: 0,
+        targetVertical: 0,
+        trapped: false,
+        positionHistory: [],
+        lastMoveDir: 0,
+        lastVerticalDir: 0,
+      }));
+
+      const playerSpawnX = spawn?.x ?? 1;
+      const playerSpawnY = spawn?.y ?? 1;
+
+      // Initialize game state
+      gameState = {
+        player: {
+          x: playerSpawnX * tileSize,
+          y: playerSpawnY * tileSize,
+          vx: 0,
+          vy: 0,
+          facingRight: true,
+          state: 'idle',
+          animFrame: 0,
+          animTimer: 0,
+          trapped: false,
+        },
+        enemies: initializedEnemies,
+        goldCollected: 0,
+        totalGold: goldPositions.length,
+        level: levelCopy,
+        baseLevel: baseLevel,
+        dugBricks: [],
+        isPlaying: true,
+        tileSize: tileSize,
+        lives: 3,
+        spawnX: playerSpawnX,
+        spawnY: playerSpawnY,
+      };
+
+      // ASCII view
+      document.getElementById('ascii-view').innerHTML = levelToAsciiHtml(level);
+
+      // Stats
+      document.getElementById('stats').innerHTML = `
+        <strong>Original Level ${index + 1}</strong> |
+        Gold: ${goldPositions.length} |
+        Enemies: ${enemies.length}
+      `;
+
+      // Focus canvas
+      document.getElementById('level-canvas').focus();
+    }
+
+    // Update UI based on mode
+    function updateModeUI() {
+      const originalControls = document.getElementById('original-controls');
+      const generatedControls = document.getElementById('generated-controls');
+
+      if (gameMode === 'original') {
+        originalControls.style.display = 'inline';
+        generatedControls.style.display = 'none';
+      } else {
+        originalControls.style.display = 'none';
+        generatedControls.style.display = 'inline';
+      }
+    }
+
+    function generateAndRender(useConstructive = false) {
+      const tileSize = calculateTileSize();
+      const goldCount = parseInt(document.getElementById('gold-count').value);
+      const enemyCount = parseInt(document.getElementById('enemy-count').value);
+
+      // Generate structure
+      let level;
+      if (useConstructive) {
+        level = generateConstructive(LEVEL_WIDTH, LEVEL_HEIGHT);
+      } else {
+        level = markovGen.generate(LEVEL_WIDTH, LEVEL_HEIGHT);
+      }
+
+      // Save the PURE structure level BEFORE entity placement
+      // This is critical for spawn validation - entity markers can overwrite tiles
+      const structureLevel = level.map(row => [...row]);
+
+      // Place entities
+      const result = placeEntities(level, goldCount, enemyCount);
+
+      // Deep copy level for game state
+      const levelCopy = result.level.map(row => [...row]);
+      const baseLevel = result.level.map(row => [...row]);
+
+      // Helper to check if a tile is solid (brick or solid block)
+      // Uses structureLevel to check ORIGINAL tile type before entity placement
+      const isSolidAt = (x, y) => {
+        if (y < 0 || y >= LEVEL_HEIGHT || x < 0 || x >= LEVEL_WIDTH) return true;
+        const tile = structureLevel[y][x];
+        return tile === 'b' || tile === 'B';
+      };
+
+      // Helper to check if a tile is passable for spawning
+      // Uses structureLevel to check ORIGINAL tile type
+      const isPassableAt = (x, y) => {
+        if (y < 0 || y >= LEVEL_HEIGHT || x < 0 || x >= LEVEL_WIDTH) return false;
+        const tile = structureLevel[y][x];
+        // Passable tiles: empty, ladder, rope
+        return tile === '.' || tile === '#' || tile === '-';
+      };
+
+      // Helper to check if a tile is valid ground to stand on
+      const hasGroundBelow = (x, y) => {
+        if (y + 1 >= LEVEL_HEIGHT) return true; // Bottom of level is always ground
+        const tileBelow = structureLevel[y + 1][x];
+        return tileBelow === 'b' || tileBelow === 'B';
+      };
+
+      // Initialize enemies with full state
+      // Verify spawn position is valid and adjust if needed
+      const initializedEnemies = result.enemies.map(e => {
+        let spawnX = e.x;
+        let spawnY = e.y;
+
+        // Check if the original spawn position is valid
+        // A valid position is: passable tile with solid ground below
+        const isValidSpawn = (x, y) => {
+          return isPassableAt(x, y) && hasGroundBelow(x, y);
+        };
+
+        // If starting position isn't valid, search for a valid nearby position
+        if (!isValidSpawn(spawnX, spawnY)) {
+          let found = false;
+
+          // First try: search upward (entity might be inside a block)
+          for (let testY = spawnY - 1; testY >= 0 && !found; testY--) {
+            if (isValidSpawn(spawnX, testY)) {
+              spawnY = testY;
+              found = true;
+            }
+          }
+
+          // Second try: search in expanding radius
+          if (!found) {
+            for (let radius = 1; radius < 10 && !found; radius++) {
+              for (let dy = -radius; dy <= radius && !found; dy++) {
+                for (let dx = -radius; dx <= radius && !found; dx++) {
+                  const testX = e.x + dx;
+                  const testY = e.y + dy;
+                  if (testX >= 0 && testX < LEVEL_WIDTH && testY >= 0 && testY < LEVEL_HEIGHT - 1) {
+                    if (isValidSpawn(testX, testY)) {
+                      spawnX = testX;
+                      spawnY = testY;
+                      found = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Log if we had to relocate
+          if (found && (spawnX !== e.x || spawnY !== e.y)) {
+            console.log(`Enemy relocated from (${e.x},${e.y}) to (${spawnX},${spawnY})`);
+          }
+        }
+
+        return {
+          x: spawnX * tileSize,
+          y: spawnY * tileSize,
+          vx: 0,
+          vy: 0,
+          facingRight: Math.random() > 0.5,
+          state: 'idle',
+          animFrame: 0,
+          animTimer: 0,
+          thinkTimer: Math.random() * ENEMY_THINK_INTERVAL,
+          targetDir: 0,
+          targetVertical: 0,
+          trapped: false,
+        };
+      });
+
+      // Verify player spawn position and adjust if needed
+      let playerSpawnX = result.spawn?.x ?? 0;
+      let playerSpawnY = result.spawn?.y ?? 0;
+
+      // Check if the original spawn position is valid
+      const isValidPlayerSpawn = (x, y) => {
+        return isPassableAt(x, y) && hasGroundBelow(x, y);
+      };
+
+      // If starting position isn't valid, search for a valid nearby position
+      if (!isValidPlayerSpawn(playerSpawnX, playerSpawnY)) {
+        const origX = result.spawn?.x ?? 0;
+        const origY = result.spawn?.y ?? 0;
+        let found = false;
+
+        // First try: search upward (player might be inside a block)
+        for (let testY = playerSpawnY - 1; testY >= 0 && !found; testY--) {
+          if (isValidPlayerSpawn(playerSpawnX, testY)) {
+            playerSpawnY = testY;
+            found = true;
+          }
+        }
+
+        // Second try: search in expanding radius
+        if (!found) {
+          for (let radius = 1; radius < 10 && !found; radius++) {
+            for (let dy = -radius; dy <= radius && !found; dy++) {
+              for (let dx = -radius; dx <= radius && !found; dx++) {
+                const testX = origX + dx;
+                const testY = origY + dy;
+                if (testX >= 0 && testX < LEVEL_WIDTH && testY >= 0 && testY < LEVEL_HEIGHT - 1) {
+                  if (isValidPlayerSpawn(testX, testY)) {
+                    playerSpawnX = testX;
+                    playerSpawnY = testY;
+                    found = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Log if we had to relocate
+        if (found && (playerSpawnX !== origX || playerSpawnY !== origY)) {
+          console.log(`Player relocated from (${origX},${origY}) to (${playerSpawnX},${playerSpawnY})`);
+        }
+      }
+
+      // Initialize game state
+      gameState = {
+        player: {
+          x: playerSpawnX * tileSize,
+          y: playerSpawnY * tileSize,
+          vx: 0,
+          vy: 0,
+          facingRight: true,
+          state: 'idle',
+          animFrame: 0,
+          animTimer: 0,
+          trapped: false,
+        },
+        enemies: initializedEnemies,
+        goldCollected: 0,
+        totalGold: result.goldPositions.length,
+        level: levelCopy,
+        baseLevel: baseLevel,
+        dugBricks: [],
+        isPlaying: true,
+        tileSize: tileSize,
+        lives: 3,
+        spawnX: playerSpawnX,
+        spawnY: playerSpawnY,
+      };
+
+      // ASCII view
+      document.getElementById('ascii-view').innerHTML = levelToAsciiHtml(result.level);
+
+      // Stats
+      const goldPlaced = result.goldPositions.length;
+      const enemiesPlaced = result.enemies.length;
+      document.getElementById('stats').innerHTML = `
+        <strong>Stats:</strong>
+        Gold: ${goldPlaced}/${goldCount} |
+        Enemies: ${enemiesPlaced}/${enemyCount} |
+        Size: ${LEVEL_WIDTH}x${LEVEL_HEIGHT} |
+        Tile Size: ${tileSize}px |
+        Canvas: ${LEVEL_WIDTH * tileSize}x${LEVEL_HEIGHT * tileSize}px
+      `;
+
+      // Focus canvas for keyboard input
+      document.getElementById('level-canvas').focus();
+    }
+
+    // Calculate responsive tile size based on screen
+    function calculateTileSize() {
+      const maxWidth = window.innerWidth - 40; // padding
+      const maxHeight = window.innerHeight - 180; // header, controls, status
+
+      // Calculate max tile size that fits
+      const tileByWidth = Math.floor(maxWidth / LEVEL_WIDTH);
+      const tileByHeight = Math.floor(maxHeight / LEVEL_HEIGHT);
+
+      // Use the smaller of the two, clamped between 16 and 64
+      let tileSize = Math.min(tileByWidth, tileByHeight);
+      tileSize = Math.max(16, Math.min(64, tileSize));
+
+      return tileSize;
+    }
+
+    // Event listeners - Mode selector
+    document.getElementById('mode-select').addEventListener('change', (e) => {
+      gameMode = e.target.value;
+      updateModeUI();
+
+      if (gameMode === 'original') {
+        loadOriginalLevel(currentLevelIndex);
+      } else {
+        generateAndRender(false);
+      }
+    });
+
+    // Level navigation for original mode
+    document.getElementById('prev-level-btn').addEventListener('click', () => {
+      if (currentLevelIndex > 0) {
+        loadOriginalLevel(currentLevelIndex - 1);
+      }
+    });
+
+    document.getElementById('next-level-btn').addEventListener('click', () => {
+      if (currentLevelIndex < ORIGINAL_LEVELS.length - 1) {
+        loadOriginalLevel(currentLevelIndex + 1);
+      }
+    });
+
+    // Generate button for generated mode
+    document.getElementById('generate-btn').addEventListener('click', () => {
+      generateAndRender(false);
+    });
+
+    // Keyboard input
+    const canvas = document.getElementById('level-canvas');
+    canvas.addEventListener('keydown', handleKeyDown);
+    canvas.addEventListener('keyup', handleKeyUp);
+    // Also listen on window for better input capture
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'z', 'x', 'Z', 'X'].includes(e.key)) {
+        e.preventDefault();
+        handleKeyDown(e);
+      }
+    });
+    window.addEventListener('keyup', handleKeyUp);
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+      if (gameState.baseLevel) {
+        const newTileSize = calculateTileSize();
+        // Recalculate positions for new tile size
+        const oldTileSize = gameState.tileSize;
+        const scale = newTileSize / oldTileSize;
+
+        gameState.player.x *= scale;
+        gameState.player.y *= scale;
+        for (const enemy of gameState.enemies) {
+          enemy.x *= scale;
+          enemy.y *= scale;
+        }
+        gameState.tileSize = newTileSize;
+      }
+    });
+
+    // Init - start with original levels mode
+    loadSprites().then(() => {
+      updateModeUI();
+      loadOriginalLevel(0);
+      requestAnimationFrame(gameLoop);
+    });
+  </script>
+</body>
+</html>

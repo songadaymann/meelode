@@ -1,0 +1,15 @@
+{
+  "name": "meelode",
+  "version": "0.1.0",
+  "description": "Lode Runner style game with procedural level generation",
+  "type": "module",
+  "scripts": {
+    "demo": "npx tsx src/procgen/demo.ts",
+    "test": "npx tsx src/procgen/demo.ts"
+  },
+  "devDependencies": {
+    "jimp": "^1.6.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Lode Runner Web Game</title>
+	<!--
+	* =================================================================================== 
+	* Lode Runner (超級運動員) - APPLE II & C64 version
+	*
+	* This program is a HTML5 remake game.
+	*
+	* The program code base on CreateJS JavaScript libraries !
+	* http://www.createjs.com/
+	*
+	* The AI algorithm reference book:
+	* http://www.kingstone.com.tw/book/book_page.asp?kmcode=2014710650538
+	* http://www.amazon.co.jp/Lode-Runnerで学ぶ実践C言語-ビー・エヌ・エヌ企画部/dp/4893690116
+	* 
+	* Source Code: https://github.com/SimonHung/LodeRunner_TotalRecall
+	* Web page: http://LodeRunnerWebGame.com
+	*
+	* by Simon Hung 06/20/2014, 11/23/2014, 06/29/2015, 09/28/2016, 03/26/2025
+	* =================================================================================== 
+	-->
+	<meta http-equiv="Content-Type" content="text/html" charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="chrome=1, IE=edge">
+	
+	<link href="lodeRunner.ico"  rel="shortcut icon" >
+	<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+	
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		body {
+			margin: 0;
+			overflow: hidden;
+			background: #1a1a1a;
+			width: 100vw;
+			height: 100vh;
+		}
+		/* Hide all side icon canvases */
+		#main_menu, #select_menu, #theme_menu, #info_menu,
+		#help_menu, #paste_icon, #theme_color_selector { display: none !important; }
+
+		/* Game container - holds frame and canvas */
+		#game-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+		}
+
+		/* Frame wrapper - maintains aspect ratio */
+		#frame-wrapper {
+			position: relative;
+			/* Frame aspect ratio: 2784/1536 = 1.8125 */
+		}
+
+		/* Frame image */
+		#frame-overlay {
+			width: 100%;
+			height: 100%;
+			pointer-events: none;
+			z-index: 1000;
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+
+		/* Canvas positioned within the frame's screen area */
+		#canvas {
+			position: absolute;
+			/* These will be set by JavaScript based on frame screen area */
+		}
+
+		/* Menu button click area - positioned over the MENU text in frame */
+		#menu-button {
+			position: absolute;
+			bottom: 11%;
+			right: 0.2%;
+			width: 60px;
+			height: 50px;
+			cursor: pointer;
+			z-index: 1001;
+			/* background: rgba(255,0,0,0.5); /* DEBUG: uncomment to show button position */
+		}
+
+		/* Menu Modal Overlay */
+		#menu-modal {
+			display: none;
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			background: rgba(0, 0, 0, 0.7);
+			z-index: 2000;
+			justify-content: center;
+			align-items: center;
+		}
+
+		#menu-modal.active {
+			display: flex;
+		}
+
+		/* Menu Modal Content */
+		#menu-content {
+			background: #f5f5f5;
+			border: 4px solid #333;
+			border-radius: 8px;
+			padding: 30px 50px;
+			text-align: center;
+			box-shadow: 8px 8px 0 rgba(0,0,0,0.3);
+		}
+
+		#menu-content h2 {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 24px;
+			color: #333;
+			margin-bottom: 30px;
+			text-transform: uppercase;
+		}
+
+		.menu-option {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 14px;
+			color: #333;
+			background: #fff;
+			border: 3px solid #333;
+			padding: 15px 30px;
+			margin: 10px 0;
+			cursor: pointer;
+			display: block;
+			width: 100%;
+			text-transform: uppercase;
+			transition: all 0.1s;
+		}
+
+		.menu-option:hover {
+			background: #333;
+			color: #fff;
+		}
+
+		#menu-close {
+			font-family: 'Courier New', monospace;
+			font-size: 12px;
+			color: #666;
+			background: none;
+			border: none;
+			margin-top: 20px;
+			cursor: pointer;
+			text-decoration: underline;
+		}
+
+		#menu-close:hover {
+			color: #333;
+		}
+
+		/* Leaderboard Modal */
+		#leaderboard-modal {
+			display: none;
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100vw;
+			height: 100vh;
+			background: rgba(0, 0, 0, 0.85);
+			z-index: 2001;
+			justify-content: center;
+			align-items: center;
+		}
+
+		#leaderboard-modal.active {
+			display: flex;
+		}
+
+		#leaderboard-content {
+			background: #1a1a2e;
+			border: 4px solid #e94560;
+			border-radius: 8px;
+			padding: 20px 30px;
+			max-width: 500px;
+			width: 90%;
+			max-height: 80vh;
+			overflow-y: auto;
+			box-shadow: 0 0 30px rgba(233, 69, 96, 0.3);
+		}
+
+		#leaderboard-content h2 {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 18px;
+			color: #e94560;
+			margin-bottom: 20px;
+			text-align: center;
+			text-transform: uppercase;
+		}
+
+		.leaderboard-tabs {
+			display: flex;
+			justify-content: center;
+			gap: 10px;
+			margin-bottom: 20px;
+		}
+
+		.leaderboard-tab {
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+			padding: 8px 12px;
+			background: #16213e;
+			border: 2px solid #0f3460;
+			color: #fff;
+			cursor: pointer;
+		}
+
+		.leaderboard-tab.active {
+			background: #e94560;
+			border-color: #e94560;
+		}
+
+		.leaderboard-entry {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 10px;
+			margin: 5px 0;
+			background: #16213e;
+			border-radius: 4px;
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+		}
+
+		.leaderboard-entry .rank {
+			color: #e94560;
+			width: 30px;
+		}
+
+		.leaderboard-entry .name {
+			color: #fff;
+			flex: 1;
+			margin: 0 10px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.leaderboard-entry .score {
+			color: #ffd700;
+		}
+
+		.leaderboard-entry .level {
+			color: #00ff88;
+			margin-left: 10px;
+			font-size: 8px;
+		}
+
+		.leaderboard-loading {
+			text-align: center;
+			color: #fff;
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 12px;
+			padding: 40px;
+		}
+
+		.leaderboard-error {
+			text-align: center;
+			color: #e94560;
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+			padding: 20px;
+		}
+
+		#leaderboard-close {
+			display: block;
+			margin: 20px auto 0;
+			font-family: 'Press Start 2P', 'Courier New', monospace;
+			font-size: 10px;
+			padding: 10px 20px;
+			background: #e94560;
+			border: none;
+			color: #fff;
+			cursor: pointer;
+			border-radius: 4px;
+		}
+
+		#leaderboard-close:hover {
+			background: #ff6b6b;
+		}
+	</style>
+
+	<script type="text/javascript" src="lodeRunner.wData.js"></script>
+
+	<script type="text/javascript" src="./lib/preloadjs-0.6.2.min.js"></script>
+	<script type="text/javascript" src="./lib/soundjs-0.6.2.min.js"></script>
+	<script type="text/javascript" src="./lib/tweenjs-0.6.2.min.js"></script>
+	<script type="text/javascript" src="./lib/easeljs-0.7.1.min.js"></script>
+	
+	<script type="text/javascript" src="flag32Id.js"></script>
+	<script type="text/javascript" src="lodeRunner.gameVerName.js"></script>
+
+	<script type="text/javascript" src="lodeRunner.v.classic.js"></script>
+	<script type="text/javascript" src="lodeRunner.v.professional.js"></script>
+	<script type="text/javascript" src="lodeRunner.v.revenge.js"></script>
+	<script type="text/javascript" src="lodeRunner.v.fanBookMod.js"></script>
+	<script type="text/javascript" src="lodeRunner.v.championship.js"></script>
+	
+	<script type="text/javascript" src="lodeRunner.storage.js"></script>
+	<script type="text/javascript" src="lodeRunner.def.js"></script>
+	<script type="text/javascript" src="lodeRunner.markov.js"></script>
+	<script type="text/javascript" src="lodeRunner.key.js"></script>
+	<script type="text/javascript" src="lodeRunner.misc.js"></script>
+	<script type="text/javascript" src="lodeRunner.hiscore.js"></script>
+	<script type="text/javascript" src="lodeRunner.leaderboard.js"></script>
+	<script type="text/javascript" src="lodeRunner.info.js"></script>
+	<script type="text/javascript" src="lodeRunner.menu.js"></script>
+	<script type="text/javascript" src="lodeRunner.iconClass.js"></script>
+	<script type="text/javascript" src="lodeRunner.runner.js"></script>
+	<script type="text/javascript" src="lodeRunner.guard.js"></script>
+	<script type="text/javascript" src="lodeRunner.demo.js"></script>
+	<script type="text/javascript" src="lodeRunner.edit.js"></script>
+	<script type="text/javascript" src="lodeRunner.preload.js"></script>
+	<script type="text/javascript" src="lodeRunner.colorTheme.js"></script>
+	<script type="text/javascript" src="lodeRunner.colorSelector.js"></script>
+	<script type="text/javascript" src="lodeRunner.gamepad.js"></script>
+	<script type="text/javascript" src="lodeRunner.main.js"></script>
+	<script type="text/javascript" src="lodeRunner.win.js"></script>
+	<script type="text/javascript" src="lodeRunner.share.js"></script>
+</head>
+<body onload="init();">
+<div id="game-container">
+	<div id="frame-wrapper">
+		<canvas id="canvas" width="1120" height="768"></canvas>
+		<img id="frame-overlay" src="image/frame.png" alt="">
+		<div id="menu-button" onclick="openMenuModal()"></div>
+	</div>
+</div>
+
+<!-- Menu Modal -->
+<div id="menu-modal" onclick="closeMenuModal(event)">
+	<div id="menu-content" onclick="event.stopPropagation()">
+		<h2>Menu</h2>
+		<button class="menu-option" onclick="selectOriginalMode()">Original Mode</button>
+		<button class="menu-option" onclick="selectGeneratedMode()">Generated Mode</button>
+		<button class="menu-option" onclick="selectFromAllLevels()">See All Levels</button>
+		<button class="menu-option" onclick="selectCreateMode()">Create Level</button>
+		<button class="menu-option" onclick="showGlobalLeaderboard()">Global Scores</button>
+		<button id="menu-close" onclick="closeMenuModal()">Close</button>
+	</div>
+</div>
+
+<!-- Leaderboard Modal -->
+<div id="leaderboard-modal" onclick="closeLeaderboardModal(event)">
+	<div id="leaderboard-content" onclick="event.stopPropagation()">
+		<h2>Global High Scores</h2>
+		<div class="leaderboard-tabs">
+			<button class="leaderboard-tab active" onclick="loadLeaderboardTab('classic')">Classic</button>
+			<button class="leaderboard-tab" onclick="loadLeaderboardTab('generated')">Generated</button>
+		</div>
+		<div id="leaderboard-list">
+			<div class="leaderboard-loading">Loading...</div>
+		</div>
+		<button id="leaderboard-close" onclick="closeLeaderboardModal()">Close</button>
+	</div>
+</div>
+
+<script>
+// =====================================================
+// mann.cool Virtual Controller Support
+// =====================================================
+// This allows the game to be played via mann.cool's
+// virtual D-pad and action buttons on mobile devices.
+//
+// Controls mapping for Lode Runner:
+// - D-pad: Movement (ArrowUp/Down/Left/Right)
+// - A button (Z key): Dig left
+// - B button (X key): Dig right
+// =====================================================
+
+(function() {
+	// Map arrow key names to keyCodes
+	var keyCodeMap = {
+		'ArrowLeft': 37,
+		'ArrowRight': 39,
+		'ArrowUp': 38,
+		'ArrowDown': 40,
+		'z': 90,
+		'Z': 90,
+		'x': 88,
+		'X': 88,
+		'Escape': 27,
+		'Enter': 13
+	};
+
+	window.addEventListener('message', function(event) {
+		var data = event.data || {};
+		var type = data.type;
+		var key = data.key;
+		var eventType = data.eventType;
+
+		// Resume audio context if suspended (browser suspends when clicking outside iframe)
+		if (typeof createjs !== 'undefined' && createjs.Sound && createjs.Sound.activePlugin) {
+			var ctx = createjs.Sound.activePlugin.context;
+			if (ctx && ctx.state === 'suspended') {
+				ctx.resume();
+			}
+		}
+
+		// Handle keyboard events from virtual controller
+		if (type === 'keyEvent' && key && eventType) {
+			var keyCode = keyCodeMap[key];
+			if (keyCode) {
+				// Create and dispatch keyboard event
+				var kbEvent = new KeyboardEvent(eventType, {
+					key: key,
+					code: key,
+					keyCode: keyCode,
+					which: keyCode,
+					bubbles: true,
+					cancelable: true
+				});
+
+				// Dispatch to document (where handleKeyDown listens)
+				document.dispatchEvent(kbEvent);
+
+				// Also directly call pressKey for keydown to ensure it works
+				if (eventType === 'keydown' && typeof pressKey === 'function') {
+					// Only process if game is in a playable state
+					if (typeof gameState !== 'undefined' &&
+						(gameState === GAME_START || gameState === GAME_RUNNING ||
+						 (gameState === GAME_PAUSE && keyCode === 27))) {
+						pressKey(keyCode);
+					}
+				}
+			}
+		}
+
+		// Handle click events (for potential touch-to-start)
+		if (type === 'clickEvent' && eventType) {
+			var canvas = document.getElementById('canvas');
+			if (canvas) {
+				canvas.dispatchEvent(new MouseEvent(eventType, {
+					bubbles: true,
+					cancelable: true,
+					view: window
+				}));
+			}
+
+			// Also trigger game start if waiting
+			if (eventType === 'mousedown' && typeof stopDemoAndPlay === 'function') {
+				if (typeof gameState !== 'undefined' && gameState === GAME_WAITING) {
+					stopDemoAndPlay();
+				}
+			}
+		}
+	});
+
+	// Detect if running in iframe and log it
+	if (window.parent !== window) {
+		console.log('Meelode: Running inside iframe (mann.cool mode)');
+	}
+})();
+
+function openMenuModal() {
+	console.log('>>> openMenuModal() called');
+	document.getElementById('menu-modal').classList.add('active');
+	if (typeof gamePause === 'function') {
+		console.log('  - calling gamePause()');
+		gamePause();
+	}
+	console.log('  - modal should now be visible');
+}
+
+function closeMenuModal(event) {
+	console.log('>>> closeMenuModal() called, event:', event);
+	if (event && event.target !== document.getElementById('menu-modal')) {
+		console.log('  - click was on content, ignoring');
+		return;
+	}
+	console.log('  - closing modal');
+	document.getElementById('menu-modal').classList.remove('active');
+}
+
+// =====================================================
+// Global Leaderboard Functions
+// =====================================================
+var currentLeaderboardTab = 'classic';
+
+function showGlobalLeaderboard() {
+	console.log('>>> showGlobalLeaderboard() called');
+	closeMenuModal();
+	document.getElementById('leaderboard-modal').classList.add('active');
+	loadLeaderboardTab('classic');
+}
+
+function closeLeaderboardModal(event) {
+	if (event && event.target !== document.getElementById('leaderboard-modal')) {
+		return;
+	}
+	document.getElementById('leaderboard-modal').classList.remove('active');
+	if (typeof gameResume === 'function') gameResume();
+}
+
+function loadLeaderboardTab(variant) {
+	currentLeaderboardTab = variant;
+
+	// Update tab buttons
+	var tabs = document.querySelectorAll('.leaderboard-tab');
+	tabs.forEach(function(tab) {
+		tab.classList.remove('active');
+		if (tab.textContent.toLowerCase() === variant) {
+			tab.classList.add('active');
+		}
+	});
+
+	// Show loading
+	var listEl = document.getElementById('leaderboard-list');
+	listEl.innerHTML = '<div class="leaderboard-loading">Loading...</div>';
+
+	// Fetch leaderboard
+	if (window.meelodeLeaderboard) {
+		// Determine playData based on variant
+		var playDataForVariant = variant === 'generated' ? 1 : 1;
+		var playModeForVariant = variant === 'generated' ? PLAY_GENERATED : PLAY_CLASSIC;
+
+		window.meelodeLeaderboard.fetch(playDataForVariant, playModeForVariant, 10, function(result) {
+			if (result.success && result.entries && result.entries.length > 0) {
+				renderLeaderboard(result.entries);
+			} else if (result.entries && result.entries.length === 0) {
+				listEl.innerHTML = '<div class="leaderboard-error">No scores yet!<br>Be the first to play!</div>';
+			} else {
+				listEl.innerHTML = '<div class="leaderboard-error">Failed to load scores.<br>' + (result.error || 'Try again later.') + '</div>';
+			}
+		});
+	} else {
+		listEl.innerHTML = '<div class="leaderboard-error">Leaderboard not available</div>';
+	}
+}
+
+function renderLeaderboard(entries) {
+	var listEl = document.getElementById('leaderboard-list');
+	var html = '';
+
+	entries.forEach(function(entry, index) {
+		var rank = entry.rank || (index + 1);
+		var name = entry.name || '???';
+		var score = entry.score || 0;
+		var level = entry.level || 0;
+
+		html += '<div class="leaderboard-entry">';
+		html += '<span class="rank">#' + rank + '</span>';
+		html += '<span class="name">' + escapeHtml(name) + '</span>';
+		html += '<span class="score">' + formatScore(score) + '</span>';
+		html += '<span class="level">L' + level + '</span>';
+		html += '</div>';
+	});
+
+	listEl.innerHTML = html;
+}
+
+function escapeHtml(text) {
+	var div = document.createElement('div');
+	div.textContent = text;
+	return div.innerHTML;
+}
+
+function formatScore(score) {
+	return String(score).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function selectOriginalMode() {
+	console.log('>>> selectOriginalMode() called');
+	closeMenuModal();
+	playMode = PLAY_CLASSIC;
+	playData = 1;
+	curLevel = 1;
+	console.log('  - playMode:', playMode, 'playData:', playData, 'curLevel:', curLevel);
+	levelData = getPlayVerData(playData);
+	console.log('  - levelData loaded, length:', levelData.length);
+	selectGame(0);
+}
+
+function selectGeneratedMode() {
+	console.log('>>> selectGeneratedMode() called');
+	closeMenuModal();
+	// Use the existing generatedPlay function which loads Markov model
+	generatedPlay(0, null);
+}
+
+function selectCreateMode() {
+	console.log('>>> selectCreateMode() called');
+	closeMenuModal();
+
+	// Check if assets are loaded (textData is needed for drawText)
+	if (typeof textData === 'undefined' || !textData || !textData.getAnimation) {
+		console.log('  - assets not loaded yet, need to start game first');
+		alert('Please start a game first to load assets, then try Create Level again.');
+		return;
+	}
+
+	// Start the level editor
+	startEditMode();
+}
+
+function selectFromAllLevels() {
+	console.log('>>> selectFromAllLevels() called');
+	closeMenuModal();
+
+	// Check if sprite sheets are loaded (they're needed to render level thumbnails)
+	if (typeof guardData === 'undefined' || !guardData || !guardData.getAnimation) {
+		console.log('  - assets not loaded yet, starting game first');
+		// Assets not ready - just start the game in classic mode
+		playMode = PLAY_CLASSIC;
+		playData = 1;
+		curLevel = 1;
+		levelData = getPlayVerData(playData);
+		selectGame(0);
+		return;
+	}
+
+	// Set up classic mode BEFORE calling selectDialog (it checks playMode)
+	playMode = PLAY_CLASSIC;
+	playData = 1;
+	if (!levelData || levelData.length === 0) {
+		levelData = getPlayVerData(playData);
+	}
+
+	// Initialize modernScoreInfo if not exists (needed by setLevelInfo)
+	if (typeof modernScoreInfo === 'undefined' || !modernScoreInfo) {
+		modernScoreInfo = [];
+		for (var i = 0; i < levelData.length; i++) {
+			modernScoreInfo[i] = -1;
+		}
+	}
+
+	var titleName = playDataToTitleName(playData);
+	console.log('  - titleName:', titleName, 'levelData.length:', levelData.length, 'playMode:', playMode);
+
+	// Call selectDialog with all required parameters
+	selectDialog(titleName, checkBitmap, levelData, curLevel, screenX1, screenY1,
+		mainStage, tileScale,
+		function(selectedLevel) {
+			console.log('  - level selected:', selectedLevel);
+			curLevel = selectedLevel;
+			console.log('  - starting game at level', curLevel);
+			selectGame(0);  // Use selectGame which properly initializes everything
+		},
+		null,  // closeFun
+		null   // postFun - don't need a callback here
+	);
+}
+</script>
+</body>	
+</html>
