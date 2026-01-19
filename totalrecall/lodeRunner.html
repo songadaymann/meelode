@@ -706,6 +706,8 @@ window.syncVirtualInput = function() {
 			var isDown = (eventType === 'keydown');
 			var keyCode = keyCodeMap[key];
 
+			console.log('[Meelode] postMessage received:', key, eventType, '_virtualInput before:', JSON.stringify(window._virtualInput));
+
 			// Update virtual input state (CTN-style approach)
 			// This state persists and is read by the game tick loop
 			if (key === 'ArrowLeft') {
