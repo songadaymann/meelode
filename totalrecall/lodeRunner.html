@@ -2,21 +2,6 @@
 <html>
 <head>
 	<title>Lode Runner Web Game</title>
-	<script>
-	// EARLY MESSAGE LISTENER - must be registered before anything else
-	// This catches postMessage events from parent window (mann.cool)
-	window._earlyMessages = [];
-	window._messageCount = 0;
-	window.addEventListener('message', function(event) {
-		window._earlyMessages.push(event.data);
-		window._messageCount++;
-		// Visual indicator - flash the page border
-		document.documentElement.style.outline = '5px solid lime';
-		setTimeout(function() {
-			document.documentElement.style.outline = 'none';
-		}, 100);
-	});
-	</script>
 	<!--
 	* =================================================================================== 
 	* Lode Runner (超級運動員) - APPLE II & C64 version
@@ -703,13 +688,6 @@ window.syncVirtualInput = function() {
 	var isInIframe = window.parent !== window;
 
 	window.addEventListener('message', function(event) {
-		console.log('[Meelode] RAW message received:', event.data, 'from origin:', event.origin);
-
-		// Send acknowledgment back to parent (for debugging)
-		if (window.parent !== window && event.data && event.data.type === 'keyEvent') {
-			window.parent.postMessage({ type: 'meelode-ack', key: event.data.key }, '*');
-		}
-
 		var data = event.data || {};
 		var type = data.type;
 		var key = data.key;
@@ -727,8 +705,6 @@ window.syncVirtualInput = function() {
 		if (type === 'keyEvent' && key && eventType) {
 			var isDown = (eventType === 'keydown');
 			var keyCode = keyCodeMap[key];
-
-			console.log('[Meelode] postMessage received:', key, eventType, '_virtualInput before:', JSON.stringify(window._virtualInput));
 
 			// Update virtual input state (CTN-style approach)
 			// This state persists and is read by the game tick loop
