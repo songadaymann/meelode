@@ -1401,15 +1401,11 @@ function beginPlay()
 	if(playMode == PLAY_AUTO || playMode == PLAY_DEMO || playMode == PLAY_DEMO_ONCE) {
 		initPlayDemo();
 		if(playMode == PLAY_DEMO || playMode == PLAY_DEMO_ONCE) initForPlay();
-	} else { 
+	} else {
+		// Skip name input prompt - just go straight to help/game
+		// Players can enter name when they get a high score
+		showHelpMenu();
 
-		if(playerName == "" || playerName.length <= 1) {
-			inputPlayerName(mainStage, showHelpMenu);
-		} else {
-			showHelpMenu();
-		}
-			
-		
 		if(playMode != PLAY_TEST && playMode != PLAY_EDIT) {
 			enableAutoDemoTimer(); //while start game and idle too long will into demo mode
 		}
