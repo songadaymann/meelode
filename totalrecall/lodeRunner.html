@@ -651,6 +651,9 @@
 		// Handle keyboard events from virtual controller
 		if (type === 'keyEvent' && key && eventType) {
 			var keyCode = keyCodeMap[key];
+			console.log('[Meelode] keyEvent received:', key, eventType, 'keyCode:', keyCode);
+			console.log('[Meelode] document.onkeydown:', typeof document.onkeydown);
+			console.log('[Meelode] gameState:', typeof gameState !== 'undefined' ? gameState : 'undefined');
 
 			if (keyCode) {
 				// Create a fake event object with keyCode set
@@ -670,6 +673,7 @@
 				// Directly call the document's keydown/keyup handler
 				// This is more reliable than dispatchEvent for property-based handlers
 				if (eventType === 'keydown' && typeof document.onkeydown === 'function') {
+					console.log('[Meelode] Calling document.onkeydown with keyCode:', keyCode);
 					document.onkeydown(fakeEvent);
 				}
 				if (eventType === 'keyup' && typeof document.onkeyup === 'function') {
@@ -679,13 +683,18 @@
 				// Also directly call pressKey for keydown to ensure movement works
 				if (eventType === 'keydown' && typeof pressKey === 'function') {
 					// Only process if game is in a playable state (and NOT in name input mode)
-					if (typeof gameState !== 'undefined' &&
+					var inPlayableState = typeof gameState !== 'undefined' &&
 						typeof inputNameState !== 'undefined' && inputNameState !== 1 &&
 						(gameState === GAME_START || gameState === GAME_RUNNING ||
-						 (gameState === GAME_PAUSE && keyCode === 27))) {
+						 (gameState === GAME_PAUSE && keyCode === 27));
+					console.log('[Meelode] inPlayableState:', inPlayableState, 'inputNameState:', typeof inputNameState !== 'undefined' ? inputNameState : 'undefined');
+					if (inPlayableState) {
+						console.log('[Meelode] Calling pressKey with keyCode:', keyCode);
 						pressKey(keyCode);
 					}
 				}
+			} else {
+				console.log('[Meelode] No keyCode mapping for key:', key);
 			}
 		}
 
